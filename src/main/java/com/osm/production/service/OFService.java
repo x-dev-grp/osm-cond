@@ -68,7 +68,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setQuantiteCible(dto.getQuantiteCible());
         of.setDateDebutPrevue(dto.getDateDebutPrevue());
         of.setDateFinPrevue(dto.getDateFinPrevue());
-        of.setStatut(StatutOF.BROUILLON);
+        of.setStatut(StatutOF.PLANIFIE);
         for (BomLineDto lineBOMDto : bom.getLines()) {
             LigneOF ligneOF = new LigneOF();
             ligneOF.setOf(of);
@@ -87,7 +87,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
-        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE && of.getStatut() != StatutOF.BROUILLON) {
+        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE && of.getStatut() != StatutOF.PLANIFIE) {
             throw new RuntimeException("Impossible de démarrer un OF avec le statut : " + of.getStatut());
         }
 

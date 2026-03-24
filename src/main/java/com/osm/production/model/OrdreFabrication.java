@@ -24,7 +24,7 @@ public class OrdreFabrication extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private StatutOF statut = StatutOF.BROUILLON;
+    private StatutOF statut = StatutOF.PLANIFIE;
 
     private LocalDateTime dateDebutPrevue;
     private LocalDateTime dateFinPrevue;

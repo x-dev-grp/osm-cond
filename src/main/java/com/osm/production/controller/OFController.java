@@ -10,6 +10,7 @@ import com.xdev.xdevbase.services.BaseService;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -80,6 +81,21 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
         return ResponseEntity.ok(of);
     }
 
+    @GetMapping("/{id}/qr-image")
+    public ResponseEntity<byte[]> getQrImage(@PathVariable UUID id) {
+        OrdreFabrication entity = ofService.getEntityById(id);
+        if (entity.getQrHex() == null || entity.getQrHex().isBlank()) {
+            byte[] image = ofService.generateQrImageFromEntity(entity);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.IMAGE_PNG)
+                    .body(image);
+        }
+
+        byte[] image = ofService.generateQrImage(entity.getQrHex());
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .body(image);
+    }
 
 
 

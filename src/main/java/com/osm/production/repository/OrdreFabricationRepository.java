@@ -1,6 +1,5 @@
 package com.osm.production.repository;
 
-
 import com.osm.production.Enum.StatutOF;
 import com.osm.production.model.OrdreFabrication;
 import com.xdev.xdevbase.repos.BaseRepository;
@@ -13,4 +12,5 @@ import java.util.List;
 public interface OrdreFabricationRepository extends BaseRepository<OrdreFabrication> {
     List<OrdreFabrication> findByStatut(StatutOF statut);
     List<OrdreFabrication> findByDateDebutPrevueBetween(LocalDateTime debut, LocalDateTime fin);
+    // Pas de findByPublicCode / existsByPublicCode ici
 }

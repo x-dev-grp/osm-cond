@@ -1,6 +1,8 @@
 package com.osm.production.dto;
 
 
+
+
 import com.osm.production.Enum.StatutOF;
 import com.osm.production.model.OrdreFabrication;
 import com.xdev.xdevbase.dtos.BaseDto;
@@ -10,7 +12,6 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,10 +31,17 @@ public class OrdreFabricationtDto extends BaseDto<OrdreFabrication> {
     private BigDecimal quantiteNC;
     private Long dureeReelle;
     private UUID skuId;
-    private String skuCode;       // pour affichage
+    private String skuCode;
     private UUID ligneId;
-    private String ligneNom;       // pour affichage
+    private String ligneNom;
     private UUID lotVracId;
     private List<LigneOFDto> lignes;
     private UUID bomId;
+
+
+
+
+    private String publicCode;   // Code public du QR
+    private String qrUrl;        // URL de résolution
+    private String qrImageBase64;
 }

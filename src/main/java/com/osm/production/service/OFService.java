@@ -2,12 +2,17 @@ package com.osm.production.service;
 
 import com.osm.production.Enum.StatutOF;
 import com.osm.production.client.clientInventaire;
- import com.osm.production.dto.*;
+import com.osm.production.dto.*;
 import com.osm.production.model.LigneOF;
 import com.osm.production.model.OrdreFabrication;
 import com.osm.production.repository.OrdreFabricationRepository;
+import com.xdev.xdevbase.config.TenantContext;
+import com.xdev.xdevbase.qr.Component.CodeGenerator;
+import com.xdev.xdevbase.qr.Component.QrConfig;
+import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
+import jakarta.persistence.EntityNotFoundException;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -29,12 +34,59 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Autowired
     private clientInventaire clientInventaire;
 
-    protected OFService(BaseRepository<OrdreFabrication> repository, ModelMapper modelMapper) {
-        super(repository, modelMapper);
+    // Constructeur aligné avec BaseServiceImpl
+    public OFService(BaseRepository<OrdreFabrication> repository,
+                     CodeGenerator codeGenerator,
+                     QrConfig qrConfig,
+                     ModelMapper modelMapper
+                     ) {
+        super(repository, codeGenerator, qrConfig, modelMapper);
     }
+
     @Override
     public Class<OrdreFabricationtDto> getOutDTOClass() {
         return OrdreFabricationtDto.class;
+    }
+
+    @Override
+    protected String getEntityType() {
+        return "OF";
+    }
+
+    @Override
+    protected String getLabel(OrdreFabrication entity) {
+        return entity.getCode();
+    }
+
+    @Override
+    protected String getStatus(OrdreFabrication entity) {
+        return entity.getStatut().name();
+    }
+
+    @Override
+    protected String getMobileRoute() {
+        return "/of/detail";
+    }
+
+    // Optionally, override getData to return full DTO
+    @Override
+    protected Object getData(OrdreFabrication entity) {
+        return modelMapper.map(entity, outDTOClass);
+    }
+
+    @Override
+    public OrdreFabricationtDto findById(UUID id) {
+        OrdreFabrication of = repository.findByIdAndIsDeletedFalse(id)
+                .orElseThrow(() -> new EntityNotFoundException("Entity not found with this id " + id));
+        return convertToDto(of);
+    }
+
+    @Override
+    public List<OrdreFabricationtDto> findAll() {
+        UUID tenantId = TenantContext.getCurrentTenant();
+        return repository.findAllByTenantIdAndIsDeletedFalse(tenantId).stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
     }
 
     @Transactional
@@ -59,6 +111,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 throw new RuntimeException("Ligne non trouvée avec l'id : " + dto.getLigneId());
             }
         }
+
         OrdreFabrication of = new OrdreFabrication();
         of.setCode(generateCode());
         of.setSkuId(dto.getSkuId());
@@ -68,7 +121,8 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setQuantiteCible(dto.getQuantiteCible());
         of.setDateDebutPrevue(dto.getDateDebutPrevue());
         of.setDateFinPrevue(dto.getDateFinPrevue());
-        of.setStatut(StatutOF.PLANIFIE);
+        of.setStatut(StatutOF.BROUILLON);
+
         for (BomLineDto lineBOMDto : bom.getLines()) {
             LigneOF ligneOF = new LigneOF();
             ligneOF.setOf(of);
@@ -79,15 +133,23 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
 
         OrdreFabrication saved = ofRepository.save(of);
-        return convertToDto(saved);
-    }
 
+        // Génération du QR après sauvegarde
+        QrCodeInfo qrInfo = generateQrInfo(saved.getId());
+
+        // Construction du DTO de réponse avec les infos QR
+        OrdreFabricationtDto result = convertToDto(saved);
+        result.setPublicCode(qrInfo.getPublicCode());
+        result.setQrUrl(qrInfo.getQrUrl());
+        result.setQrImageBase64(qrInfo.getQrImageBase64());
+        return result;
+    }
     @Transactional
     public OrdreFabricationtDto demarrerOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
-        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE && of.getStatut() != StatutOF.PLANIFIE) {
+        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE && of.getStatut() != StatutOF.BROUILLON) {
             throw new RuntimeException("Impossible de démarrer un OF avec le statut : " + of.getStatut());
         }
 
@@ -121,6 +183,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setStatut(StatutOF.EN_COURS);
         return convertToDto(ofRepository.save(of));
     }
+
     @Transactional
     public OrdreFabricationtDto cloturerOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
@@ -172,8 +235,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return convertToDto(ofRepository.save(of));
     }
 
-
-
     private OrdreFabricationtDto convertToDto(OrdreFabrication of) {
         OrdreFabricationtDto dto = new OrdreFabricationtDto();
         dto.setId(of.getId());
@@ -190,6 +251,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         dto.setSkuId(of.getSkuId());
         dto.setLigneId(of.getLigneId());
         dto.setLotVracId(of.getLotVracId());
+        dto.setPublicCode(of.getQrHex());
+        dto.setQrUrl(getQrUrlForPublicCode(of.getQrHex()));
+        dto.setQrImageBase64(of.getQrImageBase64());
 
         try {
             SKUDto sku = clientInventaire.getSkuById(of.getSkuId());
@@ -223,6 +287,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         return dto;
     }
+
     private String generateCode() {
         return "OF-" + System.currentTimeMillis();
     }

@@ -1,5 +1,6 @@
 package com.osm.production.service;
 
+import com.osm.production.Enum.QualityStatus;
 import com.osm.production.Enum.StatutOF;
 import com.osm.production.client.clientInventaire;
 import com.osm.production.dto.*;
@@ -121,8 +122,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setQuantiteCible(dto.getQuantiteCible());
         of.setDateDebutPrevue(dto.getDateDebutPrevue());
         of.setDateFinPrevue(dto.getDateFinPrevue());
-        of.setStatut(StatutOF.BROUILLON);
-
+        of.setStatut(StatutOF.PLANIFIE);
         for (BomLineDto lineBOMDto : bom.getLines()) {
             LigneOF ligneOF = new LigneOF();
             ligneOF.setOf(of);
@@ -149,7 +149,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
-        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE && of.getStatut() != StatutOF.BROUILLON) {
+        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE ) {
             throw new RuntimeException("Impossible de démarrer un OF avec le statut : " + of.getStatut());
         }
 
@@ -192,6 +192,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         if (of.getStatut() != StatutOF.EN_COURS && of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Seul un OF en cours ou en pause peut être clôturé");
         }
+        if (of.getQualityStatus() == QualityStatus.BLOCKED) {
+            throw new RuntimeException("Impossible de clôturer un OF bloqué. Veuillez d'abord résoudre les problèmes qualité.");
+        }
 
         of.setDateFinReelle(LocalDateTime.now());
         if (of.getDateDebutReelle() != null) {
@@ -219,18 +222,17 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     @Transactional
-    public OrdreFabricationtDto ajusterConsommation(UUID id, List<AjustementConsommationDto> ajustements) {
+    public OrdreFabricationtDto ajusterConsommation(UUID id, AjustementConsommationDto ajustement) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
-        for (AjustementConsommationDto a : ajustements) {
-            LigneOF ligne = of.getLignes().stream()
-                    .filter(l -> l.getArticleId().equals(a.getArticleId()))
-                    .findFirst()
-                    .orElseThrow(() -> new RuntimeException("article non trouvé dans l'OF"));
-            ligne.setQuantiteReelle(a.getQuantiteReelle());
-            ligne.setMotifAjustement(a.getMotif());
-        }
+        LigneOF ligne = of.getLignes().stream()
+                .filter(l -> l.getArticleId().equals(ajustement.getArticleId()))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Article non trouvé dans l'OF : " + ajustement.getArticleId()));
+
+        ligne.setQuantiteReelle(ajustement.getQuantiteReelle());
+        ligne.setMotifAjustement(ajustement.getMotif());
 
         return convertToDto(ofRepository.save(of));
     }
@@ -290,5 +292,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     private String generateCode() {
         return "OF-" + System.currentTimeMillis();
+    }
+    @Override
+    public Class<OrdreFabricationtDto> getOutDTOClass() {
+        return OrdreFabricationtDto.class;
     }
 }

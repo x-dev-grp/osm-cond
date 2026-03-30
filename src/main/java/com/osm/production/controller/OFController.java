@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -24,61 +25,108 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @Autowired
     private OFService ofService;
 
-    public OFController(BaseService<OrdreFabrication, OrdreFabricationtDto, OrdreFabricationtDto> baseService, ModelMapper modelMapper) {
+    public OFController(BaseService<OrdreFabrication, OrdreFabricationtDto, OrdreFabricationtDto> baseService,
+                        ModelMapper modelMapper) {
         super(baseService, modelMapper);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<OrdreFabricationtDto> getOFById(@PathVariable UUID id) {
-        OrdreFabricationtDto of = ofService.findById(id);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> getOFById(@PathVariable UUID id) {
+        try {
+            OrdreFabricationtDto of = ofService.findById(id);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @GetMapping("/all")
-    public ResponseEntity<List<OrdreFabricationtDto>> getAllOF() {
-        List<OrdreFabricationtDto> list = ofService.findAll();
-        return ResponseEntity.ok(list);
+    public ResponseEntity<?> getAllOF() {
+        try {
+            List<OrdreFabricationtDto> list = ofService.findAll();
+            return ResponseEntity.ok(list);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PostMapping("/create")
-    public ResponseEntity<OrdreFabricationtDto> creerOF(@RequestBody OrdreFabricationtDto dto) {
-        OrdreFabricationtDto created = ofService.creerOF(dto);
-        return new ResponseEntity<>(created, HttpStatus.CREATED);
+    public ResponseEntity<?> creerOF(@RequestBody OrdreFabricationtDto dto) {
+        try {
+            OrdreFabricationtDto created = ofService.creerOF(dto);
+            return new ResponseEntity<>(created, HttpStatus.CREATED);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}/demarrer")
-    public ResponseEntity<OrdreFabricationtDto> demarrerOF(@PathVariable UUID id) {
-        OrdreFabricationtDto of = ofService.demarrerOF(id);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> demarrerOF(@PathVariable UUID id) {
+        try {
+            OrdreFabricationtDto of = ofService.demarrerOF(id);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}/pause")
-    public ResponseEntity<OrdreFabricationtDto> pauseOF(@PathVariable UUID id) {
-        OrdreFabricationtDto of = ofService.mettreEnPause(id);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> pauseOF(@PathVariable UUID id) {
+        try {
+            OrdreFabricationtDto of = ofService.mettreEnPause(id);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}/reprise")
-    public ResponseEntity<OrdreFabricationtDto> reprendreOF(@PathVariable UUID id) {
-        OrdreFabricationtDto of = ofService.reprendreOF(id);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> reprendreOF(@PathVariable UUID id) {
+        try {
+            OrdreFabricationtDto of = ofService.reprendreOF(id);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
+
     @PutMapping("/{id}/cloturer")
-    public ResponseEntity<OrdreFabricationtDto> cloturerOF(@PathVariable UUID id) {
-        OrdreFabricationtDto of = ofService.cloturerOF(id);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> cloturerOF(@PathVariable UUID id) {
+        try {
+            OrdreFabricationtDto of = ofService.cloturerOF(id);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}/production")
-    public ResponseEntity<OrdreFabricationtDto> saisirProduction(@PathVariable UUID id, @RequestBody SaisieProductionDto dto) {
-        OrdreFabricationtDto of = ofService.saisirProduction(id, dto);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> saisirProduction(@PathVariable UUID id, @RequestBody SaisieProductionDto dto) {
+        try {
+            OrdreFabricationtDto of = ofService.saisirProduction(id, dto);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PutMapping("/{id}/ajustements")
-    public ResponseEntity<OrdreFabricationtDto> ajusterConsommation(@PathVariable UUID id, @RequestBody List<AjustementConsommationDto> ajustements) {
-        OrdreFabricationtDto of = ofService.ajusterConsommation(id, ajustements);
-        return ResponseEntity.ok(of);
+    public ResponseEntity<?> ajusterConsommation(@PathVariable UUID id, @RequestBody AjustementConsommationDto ajustement) {
+        try {
+            OrdreFabricationtDto of = ofService.ajusterConsommation(id, ajustement);
+            return ResponseEntity.ok(of);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     @GetMapping("/{id}/qr-image")

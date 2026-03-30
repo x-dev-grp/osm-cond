@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.UUID;
 
@@ -12,7 +13,7 @@ import java.util.UUID;
 @Table(name = "ligne_of")
 @Getter
 @Setter
-public class LigneOF extends BaseEntity {
+public class LigneOF extends BaseEntity implements Serializable {
 
     @ManyToOne
     @JoinColumn(name = "of_id", nullable = false)

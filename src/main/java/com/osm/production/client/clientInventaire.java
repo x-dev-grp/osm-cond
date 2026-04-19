@@ -1,13 +1,14 @@
 package com.osm.production.client;
 
 
-import com.osm.production.dto.ArticleSecDto;
-import com.osm.production.dto.BOMDto;
-import com.osm.production.dto.LigneConditionnementDto;
-import com.osm.production.dto.SKUDto;
+import com.osm.production.dto.*;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+
+import java.util.Map;
 import java.util.UUID;
 
 @FeignClient(name = "inventory-service", url = "${inventory.service.url}")
@@ -25,4 +26,10 @@ public interface clientInventaire {
     @GetMapping("/api/inventaire/boms/{id}")
     BOMDto getBomById(@PathVariable("id") UUID id);
 
+    @GetMapping("/api/inventaire/stocks/article/{articleId}")
+    StockSecDto getStockByArticle(@PathVariable("articleId") UUID articleId);
+
+    @PutMapping("/api/inventaire/stocks/{articleId}/sortie")
+    StockSecDto sortieStock(@PathVariable("articleId") UUID articleId,
+                            @RequestBody Map<String, Object> payload);
 }

@@ -1,6 +1,5 @@
 package com.osm.production.controller;
 
-import com.osm.production.dto.SaisieProductionDto;
 import com.osm.production.dto.SyncRequestDto;
 import com.osm.production.service.OFService;
 import com.osm.production.service.SyncService;
@@ -16,11 +15,10 @@ import java.util.UUID;
 public class MobileSyncController {
 
     private final SyncService syncService;
-    private final OFService ofService;
+
 
     public MobileSyncController(SyncService syncService, OFService ofService) {
         this.syncService = syncService;
-        this.ofService = ofService;
     }
 
     @PostMapping("/sync")

@@ -11,6 +11,7 @@ import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.Component.CodeGenerator;
 import com.xdev.xdevbase.qr.Component.QrConfig;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
+import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -22,31 +23,28 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricationtDto, OrdreFabricationtDto> {
+public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricationDto, OrdreFabricationDto> {
 
     @Autowired
     private OrdreFabricationRepository ofRepository;
 
     @Autowired
     private clientInventaire clientInventaire;
-
-    // Constructeur aligné avec BaseServiceImpl
     public OFService(BaseRepository<OrdreFabrication> repository,
                      CodeGenerator codeGenerator,
                      QrConfig qrConfig,
                      ModelMapper modelMapper
-                     ) {
+    ) {
         super(repository, codeGenerator, qrConfig, modelMapper);
     }
 
     @Override
-    public Class<OrdreFabricationtDto> getOutDTOClass() {
-        return OrdreFabricationtDto.class;
+    public Class<OrdreFabricationDto> getOutDTOClass() {
+        return OrdreFabricationDto.class;
     }
 
     @Override
@@ -68,22 +66,20 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     protected String getMobileRoute() {
         return "/of/detail";
     }
-
-    // Optionally, override getData to return full DTO
     @Override
     protected Object getData(OrdreFabrication entity) {
         return modelMapper.map(entity, outDTOClass);
     }
 
     @Override
-    public OrdreFabricationtDto findById(UUID id) {
+    public OrdreFabricationDto findById(UUID id) {
         OrdreFabrication of = repository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Entity not found with this id " + id));
         return convertToDto(of);
     }
 
     @Override
-    public List<OrdreFabricationtDto> findAll() {
+    public List<OrdreFabricationDto> findAll() {
         UUID tenantId = TenantContext.getCurrentTenant();
         return repository.findAllByTenantIdAndIsDeletedFalse(tenantId).stream()
                 .map(this::convertToDto)
@@ -91,7 +87,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     @Transactional
-    public OrdreFabricationtDto creerOF(OrdreFabricationtDto dto) {
+    public OrdreFabricationDto creerOF(OrdreFabricationDto dto) {
         SKUDto sku = clientInventaire.getSkuById(dto.getSkuId());
         if (sku == null) {
             throw new RuntimeException("SKU non trouvé avec l'id : " + dto.getSkuId());
@@ -112,44 +108,67 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 throw new RuntimeException("Ligne non trouvée avec l'id : " + dto.getLigneId());
             }
         }
+        BigDecimal quantiteCible = dto.getQuantiteCible();
+        List<String> ruptures = new ArrayList<>();
 
+        for (BomLineDto line : bom.getLines()) {
+            UUID articleId = line.getArticleId();
+            BigDecimal besoin = line.getQuantity().multiply(quantiteCible);
+
+            StockSecDto stock;
+            try {
+                stock = clientInventaire.getStockByArticle(articleId);
+            } catch (Exception e) {
+                throw new RuntimeException("Impossible de récupérer le stock pour l'article : " + articleId, e);
+            }
+
+            Integer quantiteDisponible = (stock != null && stock.getQuantiteActuelle() != null) ? stock.getQuantiteActuelle() : 0;
+
+            if (quantiteDisponible < besoin.intValue()) {
+                ruptures.add(String.format("Article %s : besoin = %d, disponible = %d",
+                        articleId, besoin.intValue(), quantiteDisponible));
+            }
+        }
+
+        if (!ruptures.isEmpty()) {
+            throw new RuntimeException("Stock insuffisant pour créer l'OF : " + String.join(" ; ", ruptures));
+        }
         OrdreFabrication of = new OrdreFabrication();
         of.setCode(generateCode());
         of.setSkuId(dto.getSkuId());
         of.setBomId(bom.getId());
         of.setLigneId(dto.getLigneId());
         of.setLotVracId(dto.getLotVracId());
-        of.setQuantiteCible(dto.getQuantiteCible());
+        of.setQuantiteCible(quantiteCible);
         of.setDateDebutPrevue(dto.getDateDebutPrevue());
         of.setDateFinPrevue(dto.getDateFinPrevue());
         of.setStatut(StatutOF.PLANIFIE);
+
         for (BomLineDto lineBOMDto : bom.getLines()) {
             LigneOF ligneOF = new LigneOF();
             ligneOF.setOf(of);
             ligneOF.setArticleId(lineBOMDto.getArticleId());
-            BigDecimal qteTheorique = lineBOMDto.getQuantity().multiply(dto.getQuantiteCible());
+            BigDecimal qteTheorique = lineBOMDto.getQuantity().multiply(quantiteCible);
             ligneOF.setQuantiteTheorique(qteTheorique);
             of.getLignes().add(ligneOF);
         }
 
         OrdreFabrication saved = ofRepository.save(of);
 
-        // Génération du QR après sauvegarde
+        // Génération du QR
         QrCodeInfo qrInfo = generateQrInfo(saved.getId());
-
-        // Construction du DTO de réponse avec les infos QR
-        OrdreFabricationtDto result = convertToDto(saved);
+        OrdreFabricationDto result = convertToDto(saved);
         result.setPublicCode(qrInfo.getPublicCode());
         result.setQrUrl(qrInfo.getQrUrl());
         result.setQrImageBase64(qrInfo.getQrImageBase64());
         return result;
     }
     @Transactional
-    public OrdreFabricationtDto demarrerOF(UUID id) {
+    public OrdreFabricationDto demarrerOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
-        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE ) {
+        if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Impossible de démarrer un OF avec le statut : " + of.getStatut());
         }
 
@@ -159,11 +178,11 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     @Transactional
-    public OrdreFabricationtDto mettreEnPause(UUID id) {
+    public OrdreFabricationDto mettreEnPause(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
-        if (of.getStatut() != StatutOF.EN_COURS) {
+        if (of.getStatut() != StatutOF.EN_COURS ) {
             throw new RuntimeException("Seul un OF en cours peut être mis en pause");
         }
 
@@ -172,12 +191,15 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     @Transactional
-    public OrdreFabricationtDto reprendreOF(UUID id) {
+    public OrdreFabricationDto reprendreOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
         if (of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Seul un OF en pause peut être repris");
+        }
+        if (of.getQualityStatus() == QualityStatus.BLOCKED) {
+            throw new RuntimeException("Impossible de reprendre un OF bloqué par la qualité");
         }
 
         of.setStatut(StatutOF.EN_COURS);
@@ -185,7 +207,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     @Transactional
-    public OrdreFabricationtDto cloturerOF(UUID id) {
+    public OrdreFabricationDto cloturerOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
@@ -195,24 +217,51 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         if (of.getQualityStatus() == QualityStatus.BLOCKED) {
             throw new RuntimeException("Impossible de clôturer un OF bloqué. Veuillez d'abord résoudre les problèmes qualité.");
         }
+        for (LigneOF ligne : of.getLignes()) {
+            BigDecimal quantiteConsommee = (ligne.getQuantiteReelle() != null) ? ligne.getQuantiteReelle() : ligne.getQuantiteTheorique();
 
+            if (quantiteConsommee != null && quantiteConsommee.compareTo(BigDecimal.ZERO) > 0) {
+                try {
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("quantite", quantiteConsommee.intValue());
+                    payload.put("motif", "Consommation OF " + of.getCode());
+                    clientInventaire.sortieStock(ligne.getArticleId(), payload);
+                } catch (Exception e) {
+                    throw new RuntimeException("Erreur lors de la sortie de stock pour l'article " + ligne.getArticleId() + " : " + e.getMessage(), e);
+                }
+            }
+        }
         of.setDateFinReelle(LocalDateTime.now());
         if (of.getDateDebutReelle() != null) {
             long duree = ChronoUnit.MINUTES.between(of.getDateDebutReelle(), of.getDateFinReelle());
             of.setDureeReelle(duree);
         }
-
         of.setStatut(StatutOF.CLOTURE);
-        return convertToDto(ofRepository.save(of));
-    }
 
+        OrdreFabrication saved = ofRepository.save(of);
+        return convertToDto(saved);
+    }
     @Transactional
-    public OrdreFabricationtDto saisirProduction(UUID id, SaisieProductionDto dto) {
+    public OrdreFabricationDto saisirProduction(UUID id, SaisieProductionDto dto) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
         if (of.getStatut() != StatutOF.EN_COURS) {
             throw new RuntimeException("La saisie de production n'est possible que pour un OF en cours");
+        }
+        if (of.getQualityStatus() == QualityStatus.BLOCKED) {
+            throw new RuntimeException("La saisie de production n'est possible pour  un OF bloqué par la qualité");
+        }
+
+        if (dto.getQuantiteNC() != null && dto.getQuantiteNC().compareTo(BigDecimal.ZERO) > 0) {
+            if (dto.getMotifNC() == null || dto.getMotifNC().trim().isEmpty()) {
+                throw new RuntimeException("Le motif est obligatoire pour les produits non conformes (NC)");
+            }
+            if (of.getMotifNC() != null && !of.getMotifNC().isEmpty()) {
+                 of.setMotifNC(of.getMotifNC() + " | " + dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
+             } else {
+                 of.setMotifNC(dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
+             }
         }
 
         of.setQuantiteBonne(of.getQuantiteBonne().add(dto.getQuantiteBonne()));
@@ -220,9 +269,8 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         return convertToDto(ofRepository.save(of));
     }
-
     @Transactional
-    public OrdreFabricationtDto ajusterConsommation(UUID id, AjustementConsommationDto ajustement) {
+    public OrdreFabricationDto ajusterConsommation(UUID id, AjustementConsommationDto ajustement) {
         OrdreFabrication of = ofRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("OF non trouvé avec l'id : " + id));
 
@@ -237,26 +285,8 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return convertToDto(ofRepository.save(of));
     }
 
-    private OrdreFabricationtDto convertToDto(OrdreFabrication of) {
-        OrdreFabricationtDto dto = new OrdreFabricationtDto();
-        dto.setId(of.getId());
-        dto.setCode(of.getCode());
-        dto.setStatut(of.getStatut());
-        dto.setDateDebutPrevue(of.getDateDebutPrevue());
-        dto.setDateFinPrevue(of.getDateFinPrevue());
-        dto.setDateDebutReelle(of.getDateDebutReelle());
-        dto.setDateFinReelle(of.getDateFinReelle());
-        dto.setQuantiteCible(of.getQuantiteCible());
-        dto.setQuantiteBonne(of.getQuantiteBonne());
-        dto.setQuantiteNC(of.getQuantiteNC());
-        dto.setDureeReelle(of.getDureeReelle());
-        dto.setSkuId(of.getSkuId());
-        dto.setLigneId(of.getLigneId());
-        dto.setLotVracId(of.getLotVracId());
-        dto.setPublicCode(of.getQrHex());
-        dto.setQrUrl(getQrUrlForPublicCode(of.getQrHex()));
-        dto.setQrImageBase64(of.getQrImageBase64());
-
+    private OrdreFabricationDto convertToDto(OrdreFabrication of) {
+        OrdreFabricationDto dto = modelMapper.map(of, OrdreFabricationDto.class);
         try {
             SKUDto sku = clientInventaire.getSkuById(of.getSkuId());
             dto.setSkuCode(sku.getCode());
@@ -287,14 +317,39 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }).collect(Collectors.toList());
         dto.setLignes(ligneDtos);
 
+        dto.setPublicCode(of.getQrHex());
+        dto.setQrUrl(getQrUrlForPublicCode(of.getQrHex()));
+        dto.setQrImageBase64(of.getQrImageBase64());
+
+
         return dto;
     }
+
+
+
+
+
 
     private String generateCode() {
         return "OF-" + System.currentTimeMillis();
     }
+
+
+
     @Override
-    public Class<OrdreFabricationtDto> getOutDTOClass() {
-        return OrdreFabricationtDto.class;
+    @Transactional(readOnly = true)
+    public QrResolveResponse resolve(String publicCode) {
+        OrdreFabrication entity = ofRepository.findByQrHex(publicCode)
+                .orElseThrow(() -> new EntityNotFoundException("OF non trouvé pour le code : " + publicCode));
+
+        QrResolveResponse response = new QrResolveResponse();
+        response.setEntityType("OF");
+        response.setPublicCode(publicCode);
+        response.setEntityId(entity.getId().toString());
+        response.setLabel(entity.getCode());          // le label = numéro OF
+        response.setStatus(entity.getStatut().name());
+        response.setMobileRoute("/of/detail");
+        response.setData(convertToDto(entity));
+        return response;
     }
 }

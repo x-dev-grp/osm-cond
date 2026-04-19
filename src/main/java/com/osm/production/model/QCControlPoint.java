@@ -19,13 +19,12 @@ public class QCControlPoint extends BaseEntity implements Serializable {
     @ManyToOne
     @JoinColumn(name = "plan_id", nullable = false)
     private QCPlan plan;
-
     private String nom;
     @Enumerated(EnumType.STRING)
-    private ControlType type;       // NUMERIC, BOOLEAN, TEXT
+    private ControlType type;
     private Double minValue;
     private Double maxValue;
-    private boolean blocking;   // si vrai, un résultat NOK bloque l'OF
+    private boolean blocking;
 
 
 }

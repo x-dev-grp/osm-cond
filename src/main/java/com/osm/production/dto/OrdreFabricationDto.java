@@ -3,6 +3,7 @@ package com.osm.production.dto;
 
 
 
+import com.osm.production.Enum.QualityStatus;
 import com.osm.production.Enum.StatutOF;
 import com.osm.production.model.OrdreFabrication;
 import com.xdev.xdevbase.dtos.BaseDto;
@@ -18,7 +19,7 @@ import java.util.UUID;
 @Data
 @Getter
 @Setter
-public class OrdreFabricationtDto extends BaseDto<OrdreFabrication> {
+public class OrdreFabricationDto extends BaseDto<OrdreFabrication> {
     private UUID id;
     private String code;
     private StatutOF statut;
@@ -37,11 +38,10 @@ public class OrdreFabricationtDto extends BaseDto<OrdreFabrication> {
     private UUID lotVracId;
     private List<LigneOFDto> lignes;
     private UUID bomId;
-
-
-
-
-    private String publicCode;   // Code public du QR
-    private String qrUrl;        // URL de résolution
+    private LocalDateTime createdDate;;
+    private String motifNC;
+    private String publicCode;
+    private String qrUrl;
     private String qrImageBase64;
+    private QualityStatus qualityStatus;
 }

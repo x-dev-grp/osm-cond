@@ -1,6 +1,7 @@
 package com.osm.production.service;
 
 
+import com.osm.production.Enum.StatutOF;
 import com.osm.production.dto.QCResultDTO;
 import com.osm.production.Enum.ControlType;
 import com.osm.production.Enum.QualityStatus;
@@ -26,18 +27,20 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
     private final OrdreFabricationRepository ofRepository;
     private final ModelMapper modelMapper;
     private final QCPlanRepository qcPlanRepository;
+    private final OFService ofService;
 
     public QCResultService(BaseRepository<QCResult> repository,
                            QCResultRepository resultRepository,
                            QCControlPointRepository controlPointRepository,
                            OrdreFabricationRepository ofRepository,
-                           ModelMapper modelMapper, QCPlanService qcPlanService, QCPlanRepository qcPlanRepository) {
+                           ModelMapper modelMapper, QCPlanRepository qcPlanRepository, OFService ofService) {
         super(repository, modelMapper);
         this.resultRepository = resultRepository;
         this.controlPointRepository = controlPointRepository;
         this.ofRepository = ofRepository;
         this.modelMapper = modelMapper;
         this.qcPlanRepository = qcPlanRepository;
+        this.ofService = ofService;
     }
 
     @Transactional
@@ -51,8 +54,6 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
         result.setControlPoint(point);
         result.setOf(of);
         result.setDateControle(LocalDateTime.now());
-
-        // Validation automatique si numérique
         if (point.getType() == ControlType.NUMERIC && dto.getStatut() == null) {
             try {
                 Double val = Double.parseDouble(dto.getValeur());
@@ -67,7 +68,6 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
         } else {
             result.setStatut(dto.getStatut());
         }
-
         result = resultRepository.save(result);
 
         if (result.getStatut() == ResultStatus.NOK) {
@@ -78,19 +78,17 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
             controlPointRepository.save(point);
         }
 
-        // Gestion du blocage
-        // Gestion du blocage
         if (result.getStatut() == ResultStatus.NOK && point.isBlocking()) {
-
             bloquerOF(of.getId());
-
-        }
-
-        // Si résultat OK on vérifie si l'OF peut être débloqué
-        if (result.getStatut() == ResultStatus.OK) {
-
+            if (of.getStatut() == StatutOF.EN_COURS) {
+                ofService.mettreEnPause(of.getId());
+            }
+        } else if (result.getStatut() == ResultStatus.OK) {
             verifierEtDebloquerOF(of.getId());
-
+            OrdreFabrication refreshed = ofRepository.findById(of.getId()).orElseThrow();
+            if (refreshed.getQualityStatus() == QualityStatus.FREE && refreshed.getStatut() == StatutOF.EN_PAUSE) {
+                ofService.demarrerOF(of.getId());
+            }
         }
         return modelMapper.map(result, QCResultDTO.class);
     }
@@ -105,39 +103,17 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
 
 
     @Transactional
-    public void debloquerOF(UUID ofId) {
-        OrdreFabrication of = ofRepository.findById(ofId)
-                .orElseThrow(() -> new RuntimeException("OF inconnu"));
-
-        if (of.getQualityStatus() == QualityStatus.BLOCKED) {
-            // Vérifier si le déblocage est autorisé
-            verifierEtDebloquerOF(ofId);
-        }}
-
-    @Transactional
     public void verifierEtDebloquerOF(UUID ofId) {
         OrdreFabrication of = ofRepository.findById(ofId)
                 .orElseThrow(() -> new RuntimeException("OF inconnu"));
-
-        // Vérifier si l'OF est bloqué
         if (of.getQualityStatus() != QualityStatus.BLOCKED) {
-            return; // Pas besoin de débloquer
+            return;
         }
-
-        // Récupérer tous les résultats pour cet OF
         List<QCResult> allResults = resultRepository.findByOfIdOrderByDateControleDesc(ofId);
-
-        // Récupérer le plan actif et tous ses points de contrôle bloquants
         QCPlan activePlan = qcPlanRepository.findByOfIdAndActifTrue(ofId)
                 .orElseThrow(() -> new RuntimeException("Aucun plan actif pour cet OF"));
-
-
-        List<QCControlPoint> blockingPoints = controlPointRepository
-                .findByPlanIdAndBlockingTrue(activePlan.getId());
-
+        List<QCControlPoint> blockingPoints = controlPointRepository.findByPlanIdAndBlockingTrue(activePlan.getId());
         boolean tousControlesOK = true;
-
-        // Vérifier si chaque point bloquant a un résultat OK
         for (QCControlPoint blockingPoint : blockingPoints) {
             boolean pointControle = allResults.stream()
                     .anyMatch(r -> r.getControlPoint().getId().equals(blockingPoint.getId())
@@ -148,14 +124,12 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
                 break;
             }
         }
-
-        // Si tous les points bloquants sont OK, débloquer l'OF
         if (tousControlesOK) {
             of.setQualityStatus(QualityStatus.FREE);
             ofRepository.save(of);
         }
     }
-
+    @Transactional(readOnly = true)
     public List<QCResultDTO> getHistoriqueOF(UUID ofId) {
         return resultRepository.findByOfIdOrderByDateControleDesc(ofId)
                 .stream()

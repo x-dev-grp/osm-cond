@@ -7,7 +7,6 @@ import com.xdev.xdevbase.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -43,17 +42,19 @@ public class OrdreFabrication extends BaseEntity implements Serializable {
     private UUID skuId;
     @Column(name = "bom_id")
     private UUID bomId;
-    @Enumerated(EnumType.STRING)
-    private QualityStatus qualityStatus = QualityStatus.FREE;
-
     @Column(name = "ligne_id")
     private UUID ligneId;
 
     @Column(name = "lot_vrac_id")
     private UUID lotVracId;
 
+    private String motifNC;
+
     @OneToMany(mappedBy = "of", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<LigneOF> lignes = new ArrayList<>();
+
+    @Enumerated(EnumType.STRING)
+    private QualityStatus qualityStatus = QualityStatus.FREE;
 
 
 }

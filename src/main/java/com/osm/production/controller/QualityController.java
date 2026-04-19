@@ -55,7 +55,7 @@ public class QualityController {
     @GetMapping("/plans/of/{ofId}/points/active")
     public ResponseEntity<ApiResponse<List<QCControlPointDTO>>> getActivePoints(@PathVariable UUID ofId) {
         try {
-            List<QCControlPointDTO> points = planService.getActivePointsForOF(ofId);
+            List<QCControlPointDTO> points = planService.getPointsForOF(ofId);
             return ResponseEntity.ok(new ApiResponse<>(true, "Points récupérés", points));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -84,7 +84,7 @@ public class QualityController {
     @PutMapping("/resultats/of/{ofId}/debloquer")
     public ResponseEntity<ApiResponse<Void>> debloquerOF(@PathVariable UUID ofId) {
         try {
-            resultService.debloquerOF(ofId);
+            resultService.verifierEtDebloquerOF(ofId);
             return ResponseEntity.ok(new ApiResponse<>(true, "OF débloqué", null));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -105,6 +105,16 @@ public class QualityController {
             return ResponseEntity.ok(new ApiResponse<>(true, "Plan récupéré", plan));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        }
+    }
+    @DeleteMapping("/plans/points/{pointId}")
+    public ResponseEntity<ApiResponse<Void>> deleteControlPoint(@PathVariable UUID pointId) {
+        try {
+            planService.deleteControlPoint(pointId);
+            return ResponseEntity.ok(new ApiResponse<>(true, "Point supprimé", null));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(new ApiResponse<>(false, e.getMessage(), null));
         }
     }

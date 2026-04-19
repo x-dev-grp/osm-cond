@@ -14,4 +14,5 @@ import java.math.BigDecimal;
 public class SaisieProductionDto  {
     private BigDecimal quantiteBonne;
     private BigDecimal quantiteNC;
+    private String motifNC;
 }

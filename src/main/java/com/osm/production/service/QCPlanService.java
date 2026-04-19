@@ -2,7 +2,6 @@ package com.osm.production.service;
 
 import com.osm.production.dto.QCControlPointDTO;
 import com.osm.production.dto.QCPlanDTO;
-import com.osm.production.Enum.ControlType;
 import com.osm.production.model.QCControlPoint;
 import com.osm.production.model.QCPlan;
 import com.osm.production.model.OrdreFabrication;
@@ -14,9 +13,7 @@ import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -43,6 +40,9 @@ public class QCPlanService extends BaseServiceImpl<QCPlan, QCPlanDTO, QCPlanDTO>
     public QCPlanDTO createPlan(UUID ofId, String titre) {
         OrdreFabrication of = ordreFabricationRepository.findById(ofId)
                 .orElseThrow(() -> new RuntimeException("Ordre de fabrication non trouvé : " + ofId));
+        if (planRepository.findByOfIdAndActifTrue(ofId).isPresent()) {
+            throw new RuntimeException("Un plan actif existe déjà pour cet ordre de fabrication.");
+        }
 
         QCPlan plan = new QCPlan();
         plan.setOf(of);
@@ -61,8 +61,8 @@ public class QCPlanService extends BaseServiceImpl<QCPlan, QCPlanDTO, QCPlanDTO>
         point = pointRepository.save(point);
         return modelMapper.map(point, QCControlPointDTO.class);
     }
-
-    public List<QCControlPointDTO> getActivePointsForOF(UUID ofId) {
+    @Transactional(readOnly = true)
+    public List<QCControlPointDTO> getPointsForOF(UUID ofId) {
         QCPlan plan = planRepository.findByOfIdAndActifTrue(ofId)
                 .orElseThrow(() -> new RuntimeException("Aucun plan actif pour cet OF"));
         return plan.getPoints().stream()
@@ -70,13 +70,19 @@ public class QCPlanService extends BaseServiceImpl<QCPlan, QCPlanDTO, QCPlanDTO>
                 .collect(Collectors.toList());
     }
 
-
+    @Transactional(readOnly = true)
     public QCPlanDTO findActivePlanByOfId(UUID ofId) {
         QCPlan plan = planRepository.findByOfIdAndActifTrue(ofId)
                 .orElseThrow(() -> new RuntimeException("Aucun plan actif pour cet OF"));
         return modelMapper.map(plan, QCPlanDTO.class);
 
+    }
+    @Transactional
+    public void deleteControlPoint(UUID pointId) {
+        QCControlPoint point = pointRepository.findById(pointId)
+                .orElseThrow(() -> new RuntimeException("Point de contrôle introuvable"));
 
+        pointRepository.delete(point);
     }
 
 

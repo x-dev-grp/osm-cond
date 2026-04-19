@@ -1,12 +1,15 @@
 package com.osm.production.controller;
 
 import com.osm.production.dto.AjustementConsommationDto;
-import com.osm.production.dto.OrdreFabricationtDto;
+import com.osm.production.dto.OrdreFabricationDto;
 import com.osm.production.dto.SaisieProductionDto;
 import com.osm.production.model.OrdreFabrication;
 import com.osm.production.service.OFService;
+import com.xdev.communicator.models.shared.ApiResponse;
 import com.xdev.xdevbase.controllers.impl.BaseControllerImpl;
+import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.services.BaseService;
+import jakarta.persistence.EntityNotFoundException;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -20,12 +23,12 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/ordreConditionement/of")
-public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabricationtDto, OrdreFabricationtDto> {
+public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabricationDto, OrdreFabricationDto> {
 
     @Autowired
     private OFService ofService;
 
-    public OFController(BaseService<OrdreFabrication, OrdreFabricationtDto, OrdreFabricationtDto> baseService,
+    public OFController(BaseService<OrdreFabrication, OrdreFabricationDto, OrdreFabricationDto> baseService,
                         ModelMapper modelMapper) {
         super(baseService, modelMapper);
     }
@@ -33,7 +36,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @GetMapping("/{id}")
     public ResponseEntity<?> getOFById(@PathVariable UUID id) {
         try {
-            OrdreFabricationtDto of = ofService.findById(id);
+            OrdreFabricationDto of = ofService.findById(id);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -44,7 +47,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @GetMapping("/all")
     public ResponseEntity<?> getAllOF() {
         try {
-            List<OrdreFabricationtDto> list = ofService.findAll();
+            List<OrdreFabricationDto> list = ofService.findAll();
             return ResponseEntity.ok(list);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -53,20 +56,20 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     }
 
     @PostMapping("/create")
-    public ResponseEntity<?> creerOF(@RequestBody OrdreFabricationtDto dto) {
+    public ResponseEntity<ApiResponse<OrdreFabricationDto>> creerOF(@RequestBody OrdreFabricationDto dto) {
         try {
-            OrdreFabricationtDto created = ofService.creerOF(dto);
-            return new ResponseEntity<>(created, HttpStatus.CREATED);
+            OrdreFabricationDto created = ofService.creerOF(dto);
+            return ResponseEntity.ok(new ApiResponse<>(true, "OF créé avec succès", created));
         } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
         }
     }
 
     @PutMapping("/{id}/demarrer")
     public ResponseEntity<?> demarrerOF(@PathVariable UUID id) {
         try {
-            OrdreFabricationtDto of = ofService.demarrerOF(id);
+            OrdreFabricationDto of = ofService.demarrerOF(id);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -77,7 +80,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @PutMapping("/{id}/pause")
     public ResponseEntity<?> pauseOF(@PathVariable UUID id) {
         try {
-            OrdreFabricationtDto of = ofService.mettreEnPause(id);
+            OrdreFabricationDto of = ofService.mettreEnPause(id);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -88,7 +91,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @PutMapping("/{id}/reprise")
     public ResponseEntity<?> reprendreOF(@PathVariable UUID id) {
         try {
-            OrdreFabricationtDto of = ofService.reprendreOF(id);
+            OrdreFabricationDto of = ofService.reprendreOF(id);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -99,7 +102,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @PutMapping("/{id}/cloturer")
     public ResponseEntity<?> cloturerOF(@PathVariable UUID id) {
         try {
-            OrdreFabricationtDto of = ofService.cloturerOF(id);
+            OrdreFabricationDto of = ofService.cloturerOF(id);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -110,7 +113,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @PutMapping("/{id}/production")
     public ResponseEntity<?> saisirProduction(@PathVariable UUID id, @RequestBody SaisieProductionDto dto) {
         try {
-            OrdreFabricationtDto of = ofService.saisirProduction(id, dto);
+            OrdreFabricationDto of = ofService.saisirProduction(id, dto);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -121,7 +124,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @PutMapping("/{id}/ajustements")
     public ResponseEntity<?> ajusterConsommation(@PathVariable UUID id, @RequestBody AjustementConsommationDto ajustement) {
         try {
-            OrdreFabricationtDto of = ofService.ajusterConsommation(id, ajustement);
+            OrdreFabricationDto of = ofService.ajusterConsommation(id, ajustement);
             return ResponseEntity.ok(of);
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -146,10 +149,28 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     }
 
 
+    @Override
+    public ResponseEntity<?> resolve(@PathVariable String publicCode) {
+        try {
+            QrResolveResponse resolveResponse = ofService.resolve(publicCode);
+            return ResponseEntity.ok(resolveResponse);
+        } catch (EntityNotFoundException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage(), "code", "NOT_FOUND"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", e.getMessage(), "code", "INVALID_FORMAT"));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erreur interne: " + e.getMessage()));
+        }
+    }
 
 
     @Override
     protected String getResourceName() {
         return "OF";
     }
+
 }

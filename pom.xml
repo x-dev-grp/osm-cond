@@ -15,7 +15,7 @@
 
 
     <groupId>com.osm.production</groupId>
-    <artifactId>ProductionMicroservice</artifactId>
+    <artifactId>ConditionService</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>Conditionnement</name>
 

@@ -8,8 +8,7 @@ import com.osm.production.model.LigneOF;
 import com.osm.production.model.OrdreFabrication;
 import com.osm.production.repository.OrdreFabricationRepository;
 import com.xdev.xdevbase.config.TenantContext;
-import com.xdev.xdevbase.qr.Component.CodeGenerator;
-import com.xdev.xdevbase.qr.Component.QrConfig;
+import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.repos.BaseRepository;
@@ -36,10 +35,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     private clientInventaire clientInventaire;
     public OFService(BaseRepository<OrdreFabrication> repository,
                      CodeGenerator codeGenerator,
-                     QrConfig qrConfig,
                      ModelMapper modelMapper
     ) {
-        super(repository, codeGenerator, qrConfig, modelMapper);
+        super(repository, codeGenerator, modelMapper);
     }
 
     @Override
@@ -159,7 +157,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         QrCodeInfo qrInfo = generateQrInfo(saved.getId());
         OrdreFabricationDto result = convertToDto(saved);
         result.setPublicCode(qrInfo.getPublicCode());
-        result.setQrUrl(qrInfo.getQrUrl());
         result.setQrImageBase64(qrInfo.getQrImageBase64());
         return result;
     }

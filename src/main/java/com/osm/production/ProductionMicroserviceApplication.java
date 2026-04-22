@@ -11,7 +11,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 @EnableJpaRepositories(basePackages = {"com.osm.production", "com.xdev", "com.xdev.xdevbase"},
 		repositoryFactoryBeanClass = EnversRevisionRepositoryFactoryBean.class
 )
-public class ProductionMicroserviceApplication {
+public class    ProductionMicroserviceApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(ProductionMicroserviceApplication.class, args);

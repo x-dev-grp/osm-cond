@@ -38,8 +38,7 @@ public class OrdreFabricationDto extends BaseDto<OrdreFabrication> {
     private UUID lotVracId;
     private List<LigneOFDto> lignes;
     private UUID bomId;
-    private LocalDateTime createdDate;;
-    private String motifNC;
+     private String motifNC;
     private String publicCode;
     private String qrUrl;
     private String qrImageBase64;

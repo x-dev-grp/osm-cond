@@ -103,3 +103,12 @@ management:
 inventory:
   service:
     url: http://localhost:8080
+production:
+  service:
+    url: ${PRODUCTION_SERVICE_URL:http://localhost:8083}
+hr:
+  service:
+    url: ${HR_SERVICE_URL:http://localhost:8086}
+security:
+  service:
+    url: ${SECURITY_SERVICE_URL:http://localhost:8088}

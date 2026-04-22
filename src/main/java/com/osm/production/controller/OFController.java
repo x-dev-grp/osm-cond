@@ -41,6 +41,8 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
         }
     }
 
+
+
     @GetMapping("/all")
     public ResponseEntity<?> getAllOF() {
         try {
@@ -83,6 +85,10 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
         }
+    }
+    @Override
+    protected String getResourceName() {
+        return "OF";
     }
 
     @PutMapping("/{id}/reprise")
@@ -129,6 +135,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
         }
     }
 
+ //-------------QRCode---------//
     @GetMapping("/{id}/qr-image")
     public ResponseEntity<byte[]> getQrImage(@PathVariable UUID id) {
         OrdreFabrication entity = ofService.getEntityById(id);
@@ -144,12 +151,5 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
                 .contentType(MediaType.IMAGE_PNG)
                 .body(image);
     }
-
-
-
-
-    @Override
-    protected String getResourceName() {
-        return "OF";
-    }
+    //-------------QRCode---------//
 }

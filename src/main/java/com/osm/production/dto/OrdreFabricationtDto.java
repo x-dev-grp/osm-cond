@@ -42,6 +42,5 @@ public class OrdreFabricationtDto extends BaseDto<OrdreFabrication> {
 
 
     private String publicCode;   // Code public du QR
-    private String qrUrl;        // URL de résolution
     private String qrImageBase64;
 }

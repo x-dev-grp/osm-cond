@@ -8,8 +8,7 @@ import com.osm.production.model.LigneOF;
 import com.osm.production.model.OrdreFabrication;
 import com.osm.production.repository.OrdreFabricationRepository;
 import com.xdev.xdevbase.config.TenantContext;
-import com.xdev.xdevbase.qr.Component.CodeGenerator;
-import com.xdev.xdevbase.qr.Component.QrConfig;
+import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
@@ -38,10 +37,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     // Constructeur aligné avec BaseServiceImpl
     public OFService(BaseRepository<OrdreFabrication> repository,
                      CodeGenerator codeGenerator,
-                     QrConfig qrConfig,
                      ModelMapper modelMapper
                      ) {
-        super(repository, codeGenerator, qrConfig, modelMapper);
+        super(repository, codeGenerator, modelMapper);
     }
 
     @Override
@@ -49,46 +47,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return OrdreFabricationtDto.class;
     }
 
-    @Override
-    protected String getEntityType() {
-        return "OF";
-    }
-
-    @Override
-    protected String getLabel(OrdreFabrication entity) {
-        return entity.getCode();
-    }
-
-    @Override
-    protected String getStatus(OrdreFabrication entity) {
-        return entity.getStatut().name();
-    }
-
-    @Override
-    protected String getMobileRoute() {
-        return "/of/detail";
-    }
-
-    // Optionally, override getData to return full DTO
-    @Override
-    protected Object getData(OrdreFabrication entity) {
-        return modelMapper.map(entity, outDTOClass);
-    }
-
-    @Override
-    public OrdreFabricationtDto findById(UUID id) {
-        OrdreFabrication of = repository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Entity not found with this id " + id));
-        return convertToDto(of);
-    }
-
-    @Override
-    public List<OrdreFabricationtDto> findAll() {
-        UUID tenantId = TenantContext.getCurrentTenant();
-        return repository.findAllByTenantIdAndIsDeletedFalse(tenantId).stream()
-                .map(this::convertToDto)
-                .collect(Collectors.toList());
-    }
 
     @Transactional
     public OrdreFabricationtDto creerOF(OrdreFabricationtDto dto) {
@@ -140,7 +98,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         // Construction du DTO de réponse avec les infos QR
         OrdreFabricationtDto result = convertToDto(saved);
         result.setPublicCode(qrInfo.getPublicCode());
-        result.setQrUrl(qrInfo.getQrUrl());
         result.setQrImageBase64(qrInfo.getQrImageBase64());
         return result;
     }
@@ -254,7 +211,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         dto.setLigneId(of.getLigneId());
         dto.setLotVracId(of.getLotVracId());
         dto.setPublicCode(of.getQrHex());
-        dto.setQrUrl(getQrUrlForPublicCode(of.getQrHex()));
         dto.setQrImageBase64(of.getQrImageBase64());
 
         try {
@@ -289,6 +245,66 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         return dto;
     }
+
+    @Override
+    protected String getEntityType() {
+        return "OF";
+    }
+
+    @Override
+    protected String getLabel(OrdreFabrication entity) {
+        return entity.getCode();
+    }
+
+    @Override
+    protected String getStatus(OrdreFabrication entity) {
+        return entity.getStatut().name();
+    }
+
+    @Override
+    protected String getMobileRoute() {
+        return "/of/detail";
+    }
+
+    @Override
+    protected String getWebRoute(OrdreFabrication entity) {
+        return entity != null && entity.getId() != null ? "/of/" + entity.getId() : "/of";
+    }
+
+    // Optionally, override getData to return full DTO
+    @Override
+    protected Object getData(OrdreFabrication entity) {
+        return modelMapper.map(entity, outDTOClass);
+    }
+
+    @Override
+    public OrdreFabricationtDto findById(UUID id) {
+        OrdreFabrication of = repository.findByIdAndIsDeletedFalse(id)
+                .orElseThrow(() -> new EntityNotFoundException("Entity not found with this id " + id));
+        return convertToDto(of);
+    }
+
+    @Override
+    public List<OrdreFabricationtDto> findAll() {
+        UUID tenantId = TenantContext.getCurrentTenant();
+        return repository.findAllByTenantIdAndIsDeletedFalse(tenantId).stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public OrdreFabricationtDto findByCode(String code) {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("Le code OF est obligatoire");
+        }
+
+        UUID tenantId = TenantContext.getCurrentTenant();
+        String normalizedCode = code.trim();
+        OrdreFabrication of = ofRepository.findByCodeAndTenantIdAndIsDeletedFalse(normalizedCode, tenantId)
+                .orElseThrow(() -> new EntityNotFoundException("OF introuvable pour le code : " + normalizedCode));
+        return convertToDto(of);
+    }
+
 
     private String generateCode() {
         return "OF-" + System.currentTimeMillis();

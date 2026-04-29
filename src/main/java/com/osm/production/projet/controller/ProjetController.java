@@ -6,6 +6,7 @@ import com.osm.production.projet.service.ProjetService;
 import com.xdev.xdevbase.apiDTOs.ApiResponse;
 import com.xdev.xdevbase.apiDTOs.ApiSingleResponse;
 import com.xdev.xdevbase.controllers.impl.BaseControllerImpl;
+import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.services.BaseService;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.Valid;
@@ -103,7 +104,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
 
     @Override
     public ResponseEntity<ApiSingleResponse<Projet, ProjetDto>> create(
-            @Valid @RequestBody ProjetDto dto
+            @RequestBody ProjetDto dto
     ) {
         try {
             ProjetDto created = projetService.create(dto);
@@ -255,6 +256,20 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
                 .contentType(MediaType.IMAGE_PNG)
                 .body(image);
     }
+
+    @Override
+    @GetMapping("/resolve/{publicCode}")
+    public ResponseEntity<QrResolveResponse> resolve(@PathVariable String publicCode) {
+        try {
+            QrResolveResponse resolveResponse = projetService.resolve(publicCode);
+            return ResponseEntity.ok(resolveResponse);
+        } catch (EntityNotFoundException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
 
     @Override
     protected String getResourceName() {

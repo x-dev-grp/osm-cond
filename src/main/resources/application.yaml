@@ -11,14 +11,14 @@ spring:
     banner-mode: console
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/osmOC}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/osmoc}
     username: ${DB_USER:postgres}
     password: ${DB_PASS:root}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: ${HIBERNATE_DDL_AUTO:none}
+      ddl-auto: ${HIBERNATE_DDL_AUTO:update}
     show-sql: ${SHOW_SQL:false}
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 

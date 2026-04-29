@@ -4,9 +4,11 @@ import com.osm.production.projet.dto.ProjetDto;
 import com.osm.production.projet.entity.Projet;
 import com.osm.production.projet.entity.ProjetClient;
 import com.osm.production.projet.repository.ProjetRepository;
+import com.osm.production.shipping.service.ShippingInfoService;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
+import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -26,19 +28,24 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     private static final String STATUT_BROUILLON = "BROUILLON";
     private static final String STATUT_ANNULE = "ANNULE";
     private static final String CODE_PREFIX = "PRJ-";
+    private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
     private final ProjetClientService projetClientService;
+    private final ShippingInfoService shippingInfoService;
 
     public ProjetService(
             BaseRepository<Projet> repository,
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
-            ProjetClientService projetClientService) {
+            ProjetClientService projetClientService,
+            ShippingInfoService shippingInfoService
+    ) {
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
         this.projetClientService = projetClientService;
+        this.shippingInfoService = shippingInfoService;
     }
 
     @Override
@@ -52,12 +59,89 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     @Override
     @Transactional(readOnly = true)
+    public QrResolveResponse resolve(String publicCode) {
+        if (publicCode == null || publicCode.isBlank()) {
+            throw new IllegalArgumentException("Le code est obligatoire");
+        }
+
+        String normalizedCode = publicCode.trim().toUpperCase(java.util.Locale.ROOT);
+        UUID tenantId = TenantContext.getCurrentTenant();
+
+        // 1. Recherche par qrHex
+        Optional<Projet> entity = (tenantId == null)
+                ? projetRepository.findByQrHex(normalizedCode)
+                : projetRepository.findByQrHexAndTenantIdAndIsDeletedFalse(normalizedCode, tenantId);
+
+        // 2. Fallback par qrHex (tenant-agnostic) si non trouve
+        if (entity.isEmpty() && tenantId != null) {
+            entity = projetRepository.findByQrHex(normalizedCode);
+        }
+
+        // 3. Fallback par code métier (PRJ-...)
+        if (entity.isEmpty()) {
+            entity = (tenantId == null)
+                    ? projetRepository.findByCodeIgnoreCaseAndIsDeletedFalse(normalizedCode)
+                    : projetRepository.findByCodeIgnoreCaseAndTenantIdAndIsDeletedFalse(normalizedCode, tenantId);
+        }
+
+        // 4. Fallback par code métier (tenant-agnostic)
+        if (entity.isEmpty() && tenantId != null) {
+            entity = projetRepository.findByCodeIgnoreCaseAndIsDeletedFalse(normalizedCode);
+        }
+
+        return entity.map(p -> buildResolveResponse(normalizedCode, p))
+                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve pour le code : " + publicCode));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<QrResolveResponse> searchByCode(String code) {
+        try {
+            return Optional.ofNullable(resolve(code));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public ProjetDto findById(UUID id) {
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
         return toDto(projet);
     }
 
+    @Override
+    protected String getEntityType() {
+        return ENTITY_TYPE;
+    }
+
+    @Override
+    protected String getLabel(Projet entity) {
+        return entity.getCode();
+    }
+
+    @Override
+    protected String getStatus(Projet entity) {
+        return entity.getStatut();
+    }
+
+    @Override
+    protected String getMobileRoute() {
+        return "/projets/detail";
+    }
+
+    @Override
+    protected String getWebRoute(Projet entity) {
+        return "/projets/detail/" + entity.getId();
+    }
+
+    /**
+     * Correction:
+     * Ne pas override searchByCode(String) ici.
+     * Cette methode existe deja dans BaseServiceImpl avec un type de retour different.
+     * On utilise donc une methode applicative distincte pour la recherche par code projet/qr.
+     */
     @Transactional(readOnly = true)
     public ProjetDto findByCode(String code) {
         if (code == null || code.isBlank()) {
@@ -78,6 +162,9 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         return toDto(projet);
     }
 
+    /**
+     * Recherche unique via qrHex puis fallback sur le code manuel.
+     */
     @Transactional(readOnly = true)
     public ProjetDto findByUniqueCode(String code) {
         if (code == null || code.isBlank()) {
@@ -118,11 +205,14 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         Projet saved = projetRepository.save(projet);
 
         if (saved.getQrHex() == null || saved.getQrHex().isBlank()) {
-            QrCodeInfo qrInfo = generateQrInfo(saved.getId());
+            QrCodeInfo qrInfo = generateQrInfo(getEntityType(), saved.getId());
             saved.setQrHex(qrInfo.getPublicCode());
             saved.setQrImageBase64(qrInfo.getQrImageBase64());
             saved = projetRepository.save(saved);
         }
+
+        // Chaque projet doit avoir son dossier shipping dès la création.
+        shippingInfoService.ensureShippingInfoForProject(saved);
 
         return toDto(saved);
     }
@@ -214,7 +304,8 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             return generateQrImage(entity.getQrHex());
         }
 
-        QrCodeInfo qrInfo = generateQrInfo(entity.getId());
+        // Correction: utiliser un type stable et explicite
+        QrCodeInfo qrInfo = generateQrInfo(ENTITY_TYPE, entity.getId());
         return generateQrImage(qrInfo.getPublicCode());
     }
 
@@ -226,6 +317,8 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         projet.setDateLimiteLivraison(dto.getDateLimiteLivraison());
         projet.setPrixUnitaire(dto.getPrixUnitaire());
         projet.setConditionsLivraison(dto.getConditionsLivraison());
+        projet.setSkuId(dto.getSkuId());
+        projet.setBomId(dto.getBomId());
 
         if (dto.getStatut() != null && !dto.getStatut().isBlank()) {
             projet.setStatut(dto.getStatut());
@@ -268,9 +361,33 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         dto.setConditionsLivraison(projet.getConditionsLivraison());
         dto.setStatut(projet.getStatut());
         dto.setCreatedDate(projet.getCreatedDate());
-
-        dto.setQrCode(projet.getQrHex());
+        dto.setPublicCode(projet.getQrHex());
         dto.setQrImageBase64(projet.getQrImageBase64());
+        dto.setSkuId(projet.getSkuId());
+        dto.setBomId(projet.getBomId());
+
+        // Agrégation des données OF
+        if (projet.getOrdresFabrication() != null && !projet.getOrdresFabrication().isEmpty()) {
+            dto.setNombreOF(projet.getOrdresFabrication().size());
+
+            double totalProduit = projet.getOrdresFabrication().stream()
+                    .filter(of -> of.getQuantiteBonne() != null)
+                    .mapToDouble(of -> of.getQuantiteBonne().doubleValue())
+                    .sum();
+
+            dto.setQuantiteProduite(totalProduit);
+
+            if (projet.getQuantiteCible() != null && projet.getQuantiteCible() > 0) {
+                double taux = (totalProduit / projet.getQuantiteCible()) * 100.0;
+                dto.setTauxAvancement(Math.min(100.0, Math.round(taux * 100.0) / 100.0));
+            } else {
+                dto.setTauxAvancement(0.0);
+            }
+        } else {
+            dto.setNombreOF(0);
+            dto.setQuantiteProduite(0.0);
+            dto.setTauxAvancement(0.0);
+        }
 
         return dto;
     }

@@ -3,10 +3,12 @@ package com.osm.production.model;
 
 import com.osm.production.Enum.QualityStatus;
 import com.osm.production.Enum.StatutOF;
+import com.osm.production.projet.entity.Projet;
 import com.xdev.xdevbase.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -57,4 +59,7 @@ public class OrdreFabrication extends BaseEntity implements Serializable {
     private QualityStatus qualityStatus = QualityStatus.FREE;
 
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "projet_id")
+    private Projet projet;
 }

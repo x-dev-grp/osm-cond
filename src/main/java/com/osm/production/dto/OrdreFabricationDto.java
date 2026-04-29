@@ -43,4 +43,6 @@ public class OrdreFabricationDto extends BaseDto<OrdreFabrication> {
     private String qrUrl;
     private String qrImageBase64;
     private QualityStatus qualityStatus;
+    private UUID projectId;
+    private String projectCode;
 }

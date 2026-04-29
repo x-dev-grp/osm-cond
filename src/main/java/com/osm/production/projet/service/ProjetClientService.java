@@ -26,7 +26,7 @@ public class ProjetClientService extends BaseServiceImpl<ProjetClient, ProjetCli
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetClientRepository projetClientRepository) {
-        super(repository, codeGenerator, modelMapper);
+        super(repository, modelMapper);
         this.projetClientRepository = projetClientRepository;
     }
 

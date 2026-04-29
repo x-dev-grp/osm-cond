@@ -9,6 +9,7 @@ import com.osm.production.model.OrdreFabrication;
 import com.osm.production.repository.OrdreFabricationRepository;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
+import com.xdev.xdevbase.qr.Component.QrConfig;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.repos.BaseRepository;
@@ -33,11 +34,16 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Autowired
     private clientInventaire clientInventaire;
+
+    @Autowired
+    private com.osm.production.projet.service.ProjetService projetService;
+
     public OFService(BaseRepository<OrdreFabrication> repository,
                      CodeGenerator codeGenerator,
+                     QrConfig qrConfig,
                      ModelMapper modelMapper
     ) {
-        super(repository, codeGenerator, modelMapper);
+        super(repository, codeGenerator, qrConfig, modelMapper);
     }
 
     @Override
@@ -86,13 +92,32 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto creerOF(OrdreFabricationDto dto) {
+        if (dto.getProjectId() == null) {
+            throw new RuntimeException("Un OF doit obligatoirement être rattaché à un projet");
+        }
+
+        com.osm.production.projet.entity.Projet projet = projetService.findByIdOrThrow(dto.getProjectId());
+
+        // Héritage des données du projet si non spécifiées dans le DTO
+        if (dto.getSkuId() == null) {
+            dto.setSkuId(projet.getSkuId());
+        }
+        if (dto.getBomId() == null) {
+            dto.setBomId(projet.getBomId());
+        }
+
+        if (dto.getSkuId() == null) {
+            throw new RuntimeException("Le SKU est obligatoire (non défini dans l'OF ni dans le projet)");
+        }
+        if (dto.getBomId() == null) {
+            throw new RuntimeException("La BOM est obligatoire (non définie dans l'OF ni dans le projet)");
+        }
+
         SKUDto sku = clientInventaire.getSkuById(dto.getSkuId());
         if (sku == null) {
             throw new RuntimeException("SKU non trouvé avec l'id : " + dto.getSkuId());
         }
-        if (dto.getBomId() == null) {
-            throw new RuntimeException("L'identifiant de la BOM est obligatoire");
-        }
+
         BOMDto bom = clientInventaire.getBomById(dto.getBomId());
         if (bom == null) {
             throw new RuntimeException("BOM non trouvée avec l'id : " + dto.getBomId());
@@ -107,6 +132,16 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             }
         }
         BigDecimal quantiteCible = dto.getQuantiteCible();
+
+        // Validation de la quantité cumulée par rapport au projet
+        double sumExisting = projet.getOrdresFabrication().stream()
+                .mapToDouble(o -> o.getQuantiteCible().doubleValue())
+                .sum();
+
+        if (sumExisting + quantiteCible.doubleValue() > projet.getQuantiteCible()) {
+            throw new RuntimeException("La quantité cumulée des OF dépasse la quantité cible du projet (" + projet.getQuantiteCible() + ")");
+        }
+
         List<String> ruptures = new ArrayList<>();
 
         for (BomLineDto line : bom.getLines()) {
@@ -141,6 +176,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setDateDebutPrevue(dto.getDateDebutPrevue());
         of.setDateFinPrevue(dto.getDateFinPrevue());
         of.setStatut(StatutOF.PLANIFIE);
+        of.setProjet(projet);
 
         for (BomLineDto lineBOMDto : bom.getLines()) {
             LigneOF ligneOF = new LigneOF();
@@ -154,9 +190,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         OrdreFabrication saved = ofRepository.save(of);
 
         // Génération du QR
-        QrCodeInfo qrInfo = generateQrInfo(saved.getId());
+        QrCodeInfo qrInfo = generateQrInfo(saved.getClass().toString(), saved.getId());
         OrdreFabricationDto result = convertToDto(saved);
         result.setPublicCode(qrInfo.getPublicCode());
+        result.setQrUrl(qrInfo.getQrUrl());
         result.setQrImageBase64(qrInfo.getQrImageBase64());
         return result;
     }
@@ -318,6 +355,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         dto.setQrUrl(getQrUrlForPublicCode(of.getQrHex()));
         dto.setQrImageBase64(of.getQrImageBase64());
 
+        if (of.getProjet() != null) {
+            dto.setProjectId(of.getProjet().getId());
+            dto.setProjectCode(of.getProjet().getCode());
+        }
 
         return dto;
     }
@@ -349,4 +390,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         response.setData(convertToDto(entity));
         return response;
     }
+
+
 }

@@ -1,10 +1,11 @@
 package com.osm.production.projet.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.osm.production.projet.entity.Projet;
 import com.osm.production.projet.enums.TypeEmballage;
 import com.osm.production.projet.enums.TypeProduit;
 import com.xdev.xdevbase.dtos.BaseDto;
-import jakarta.validation.constraints.*;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -27,36 +28,36 @@ public class ProjetDto extends BaseDto<Projet> {
     private String clientNom;
     private String clientEmail;
 
-    @NotNull(message = "Le type de produit est obligatoire")
     private TypeProduit typeProduit;
 
-    @NotNull(message = "Le type d'emballage est obligatoire")
     private TypeEmballage typeEmballage;
 
-    @NotNull(message = "La quantité est obligatoire")
-    @Positive(message = "La quantité doit être positive")
     private Double quantiteCible;
 
-    @NotBlank(message = "L'unité est obligatoire")
     private String unite;
 
     @NotNull(message = "La date limite est obligatoire")
-    @FutureOrPresent(message = "La date doit être aujourd'hui ou dans le futur")
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate dateLimiteLivraison;
 
-    @NotNull(message = "Le prix unitaire est obligatoire")
-    @Positive(message = "Le prix doit être positif")
     private BigDecimal prixUnitaire;
 
     private BigDecimal valeurTotale;
 
-    @NotBlank(message = "Les conditions de livraison sont obligatoires")
-    @Size(max = 2000, message = "Les conditions de livraison ne doivent pas dépasser 2000 caractères")
     private String conditionsLivraison;
 
     private String statut;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdDate;
 
-    private String qrCode;
+    private String publicCode;
+    private String qrUrl;
     private String qrImageBase64;
+    private Double tauxAvancement;
+    private Double quantiteProduite;
+    private Integer nombreOF;
+
+    private UUID skuId;
+    private String skuCode;
+    private UUID bomId;
 }

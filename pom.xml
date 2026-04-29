@@ -14,10 +14,10 @@
 
 
 
-    <groupId>com.osm.production</groupId>
-    <artifactId>ConditionService</artifactId>
+    <groupId>com.osm</groupId>
+    <artifactId>conditioning-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>Conditionnement</name>
+    <name>conditioning-service</name>
 
 
     <properties>

@@ -1,0 +1,202 @@
+package com.osm.conditioning.expedition.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.osm.conditioning.client.clientInventaire;
+import com.osm.conditioning.client.clientProductionStorage;
+import com.osm.conditioning.dto.ArticleSecDto;
+import com.osm.conditioning.expedition.dto.GenealogyDto;
+import com.osm.conditioning.expedition.model.Expedition;
+import com.osm.conditioning.expedition.model.ExpeditionArticle;
+import com.osm.conditioning.model.LabelContent;
+import com.osm.conditioning.model.OrdreFabrication;
+import com.osm.conditioning.repository.LabelContentRepository;
+import com.osm.conditioning.repository.OrdreFabricationRepository;
+import com.xdev.communicator.models.shared.ApiResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class TraceabilityService {
+
+    private final clientProductionStorage productionStorageClient;
+    private final clientInventaire inventaireClient;
+    private final OrdreFabricationRepository ofRepository;
+    private final LabelContentRepository labelContentRepository;
+    private final ObjectMapper objectMapper;
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getLiveProjectTraceability(UUID projectId) {
+        try {
+            List<OrdreFabrication> ofs = ofRepository.findAllByProjetIdAndIsDeletedFalse(projectId);
+            return buildTraceabilityMap(ofs, null);
+        } catch (Exception e) {
+            log.error("Failed to get live project traceability", e);
+            throw new IllegalStateException("Impossible de charger la traçabilité en direct du projet", e);
+        }
+    }
+
+    @Transactional
+    public String captureTraceabilitySnapshot(Expedition expedition) {
+        try {
+            List<OrdreFabrication> ofs = resolveProjectOfs(expedition);
+            Map<String, Object> snapshot = buildTraceabilityMap(ofs, expedition);
+            
+            String json = objectMapper.writeValueAsString(snapshot);
+            expedition.setTraceabilitySnapshotJson(json);
+
+            log.info("Traceability snapshot captured for expedition {}", expedition.getId());
+            return json;
+        } catch (Exception e) {
+            log.error("Failed to capture traceability snapshot", e);
+            throw new IllegalStateException("Impossible de capturer la tracabilite complete de l'expedition", e);
+        }
+    }
+
+    private Map<String, Object> buildTraceabilityMap(List<OrdreFabrication> ofs, Expedition expedition) throws Exception {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        Map<UUID, Object> oilGenealogy = new LinkedHashMap<>();
+        Map<UUID, Object> ofDetails = new LinkedHashMap<>();
+        Map<UUID, Object> packagedLabelsByLot = new LinkedHashMap<>();
+
+        for (OrdreFabrication of : ofs) {
+            UUID ofId = of.getId();
+            Map<String, Object> ofSnapshot = new LinkedHashMap<>();
+            ofSnapshot.put("code", valueOrEmpty(of.getCode()));
+            ofSnapshot.put("skuId", of.getSkuId() != null ? of.getSkuId().toString() : "");
+            
+            if (of.getSkuId() != null) {
+                try {
+                    ArticleSecDto art = inventaireClient.getArticleById(of.getSkuId());
+                    if (art != null) ofSnapshot.put("articleName", art.getNom());
+                } catch (Exception e) {
+                    log.warn("Could not fetch article name for SKU {}", of.getSkuId());
+                }
+            }
+
+            ofSnapshot.put("lotVracId", of.getLotVracId() != null ? of.getLotVracId().toString() : "");
+            ofSnapshot.put("status", of.getStatut() != null ? of.getStatut().name() : "");
+            ofSnapshot.put("qualityStatus", of.getQualityStatus() != null ? of.getQualityStatus().name() : "");
+            ofSnapshot.put("quantityTarget", of.getQuantiteCible());
+            ofSnapshot.put("quantityGood", of.getQuantiteBonne());
+            ofDetails.put(ofId, ofSnapshot);
+
+            if (of.getLotVracId() == null) {
+                continue;
+            }
+
+            try {
+                ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(of.getLotVracId());
+                if (response != null && response.isSuccess() && response.getData() != null) {
+                    oilGenealogy.put(of.getLotVracId(), response.getData());
+                    packagedLabelsByLot.put(of.getLotVracId(), labelSnapshotsForLot(of.getLotVracId()));
+                }
+            } catch (Exception e) {
+                log.warn("Genealogie huile introuvable ou erreur pour le lot vrac {}", of.getLotVracId());
+            }
+        }
+
+        if (expedition != null) {
+            snapshot.put("expedition", expeditionSnapshot(expedition));
+        }
+        
+        snapshot.put("ofDetails", ofDetails);
+        snapshot.put("oilGenealogy", oilGenealogy);
+        snapshot.put("packagedLabelsByLot", packagedLabelsByLot);
+        snapshot.put("capturedAt", java.time.LocalDateTime.now().toString());
+        
+        return snapshot;
+    }
+
+    private Map<String, Object> expeditionSnapshot(Expedition expedition) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", expedition.getId());
+        data.put("expeditionNumber", expedition.getExpeditionNumber());
+        data.put("projectId", expedition.getProjet() != null ? expedition.getProjet().getId() : null);
+        data.put("projectCode", expedition.getProjet() != null ? expedition.getProjet().getCode() : null);
+        data.put("destination", expedition.getDestination());
+        data.put("plannedShipDate", expedition.getPlannedShipDate());
+        data.put("carrierName", expedition.getCarrierName());
+        data.put("driverName", expedition.getDriverName());
+        data.put("truckNumber", expedition.getTruckNumber());
+        data.put("trackingNumber", expedition.getTrackingNumber());
+        data.put("incoterm", expedition.getIncoterm());
+        return data;
+    }
+
+    private List<OrdreFabrication> resolveProjectOfs(Expedition expedition) {
+        Map<UUID, OrdreFabrication> ordered = new LinkedHashMap<>();
+
+        if (expedition.getLines() != null) {
+            for (ExpeditionArticle line : expedition.getLines()) {
+                if (line.getOfId() == null) {
+                    continue;
+                }
+                ofRepository.findById(line.getOfId()).ifPresent(of -> ordered.put(of.getId(), of));
+            }
+        }
+
+        if (expedition.getProjet() != null && expedition.getProjet().getId() != null) {
+            for (OrdreFabrication of : ofRepository.findAllByProjetIdAndIsDeletedFalse(expedition.getProjet().getId())) {
+                ordered.putIfAbsent(of.getId(), of);
+            }
+        }
+
+        return new ArrayList<>(ordered.values());
+    }
+
+    private List<Map<String, Object>> labelSnapshotsForLot(UUID lotId) {
+        return labelContentRepository.findAllByLotIdAndIsDeletedFalse(lotId).stream()
+                .sorted(Comparator.comparing(LabelContent::getPackagingDate, Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(this::labelSnapshot)
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> labelSnapshot(LabelContent label) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", label.getId());
+        data.put("publicCode", label.getQrHex());
+        data.put("status", label.getStatus() != null ? label.getStatus().name() : null);
+        data.put("category", label.getLabelCategory() != null ? label.getLabelCategory().name() : null);
+        data.put("lotId", label.getLotId());
+        data.put("lotNumber", label.getLotNumber());
+        data.put("packagingId", label.getPackagingId());
+        data.put("packagingDate", label.getPackagingDate());
+        data.put("bestBeforeDate", label.getBestBeforeDate());
+        data.put("netQuantity", label.getNetQuantity());
+        data.put("finalizedAt", label.getFinalizedAt());
+        data.put("finalizedBy", label.getFinalizedBy());
+        data.put("extractionMethod", label.getExtractionMethod());
+        data.put("sensoryProfile", label.getSensoryProfile());
+        data.put("legalDenomination", label.getLegalDenomination());
+        data.put("certifications", label.getCertifications());
+        data.put("marketingClaims", label.getMarketingClaims());
+        data.put("sourceSnapshots", label.getSourceSnapshots() == null ? List.of() : label.getSourceSnapshots().stream()
+                .filter(Objects::nonNull)
+                .map(source -> Map.of(
+                        "sourceType", source.getSourceType() != null ? source.getSourceType().name() : "",
+                        "sourceId", Optional.ofNullable(source.getSourceId()).map(UUID::toString).orElse(""),
+                        "sourceBusinessKey", valueOrEmpty(source.getSourceBusinessKey()),
+                        "snapshotJson", valueOrEmpty(source.getSnapshotJson())
+                ))
+                .collect(Collectors.toList()));
+        return data;
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
+    }
+}

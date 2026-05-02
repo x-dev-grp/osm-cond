@@ -5,7 +5,7 @@ server:
 
 spring:
   application:
-    name: ${SPRING_APP_NAME:production-service}
+    name: ${SPRING_APP_NAME:conditioning-service}
 
   main:
     banner-mode: console
@@ -102,7 +102,7 @@ management:
       show-details: always
 inventory:
   service:
-    url: http://localhost:8080
+    url: ${INVENTORY_SERVICE_URL:http://localhost:1234}
 production:
   service:
     url: ${PRODUCTION_SERVICE_URL:http://localhost:8083}

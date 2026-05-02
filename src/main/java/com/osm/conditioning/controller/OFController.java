@@ -147,12 +147,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     @GetMapping("/{id}/qr-image")
     public ResponseEntity<byte[]> getQrImage(@PathVariable UUID id) {
         OrdreFabrication entity = ofService.getEntityById(id);
-        if (entity.getQrHex() == null || entity.getQrHex().isBlank()) {
-            byte[] image = ofService.generateQrImageFromEntity(entity);
-            return ResponseEntity.ok()
-                    .contentType(MediaType.IMAGE_PNG)
-                    .body(image);
-        }
+
 
         byte[] image = ofService.generateQrImage(entity.getQrHex());
         return ResponseEntity.ok()

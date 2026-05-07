@@ -82,11 +82,12 @@ logging:
     com.osm.oilproductionservice: DEBUG
     com.xdev: DEBUG
     org.springframework.security: DEBUG
-    org.springframework.web: DEBUG
+    org.springframework.web: ${LOG_LEVEL_WEB:INFO}
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
     feign: DEBUG
-    com.netflix.discovery: DEBUG
+    com.netflix.discovery: ${LOG_LEVEL_EUREKA:WARN}
+    org.springframework.web.client.RestTemplate: ${LOG_LEVEL_REST:WARN}
 
 springdoc:
   api-docs:

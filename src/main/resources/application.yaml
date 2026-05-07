@@ -11,7 +11,7 @@ spring:
     banner-mode: console
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/osmoc}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/osmOC}
     username: ${DB_USER:postgres}
     password: ${DB_PASS:root}
     driver-class-name: org.postgresql.Driver
@@ -112,3 +112,8 @@ hr:
 security:
   service:
     url: ${SECURITY_SERVICE_URL:http://localhost:8088}
+onesignal:
+  app-id: e548b208-cac7-4a46-833b-e2ad16add4ac
+  api-key: os_v2_app_4velecgky5fenaz34kwrnlouvqygyzrdzj3eb3ul5kbvtv7lywxz76qxofcuoatnskdgszlm7om2rgcnbtdxm5wnmeqnyyj5t657rvq
+  endpoint: "https://onesignal.com/api/v1/notifications"
+

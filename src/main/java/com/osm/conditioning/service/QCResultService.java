@@ -2,12 +2,17 @@ package com.osm.conditioning.service;
 
 
 import com.osm.conditioning.Enum.StatutOF;
+import com.osm.conditioning.client.SecurityClient;
 import com.osm.conditioning.dto.QCResultDTO;
 import com.osm.conditioning.Enum.ControlType;
 import com.osm.conditioning.Enum.QualityStatus;
 import com.osm.conditioning.Enum.ResultStatus;
 import com.osm.conditioning.model.*;
 import com.osm.conditioning.repository.*;
+import com.xdev.communicator.models.shared.OSMUserDTO;
+import com.xdev.onsignalNotifcations.dto.NotificationRequest;
+import com.xdev.onsignalNotifcations.impl.OneSignalServiceImpl;
+import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import org.modelmapper.ModelMapper;
@@ -16,8 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import static com.xdev.communicator.feignServices.BaseFeignService.log;
 
 @Service
 public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCResultDTO> {
@@ -28,12 +36,18 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
     private final ModelMapper modelMapper;
     private final QCPlanRepository qcPlanRepository;
     private final OFService ofService;
+    // === AJOUT NOTIFICATIONS ===
+    private final OneSignalServiceImpl oneSignalService;
+    private final SecurityClient securityClient;
 
     public QCResultService(BaseRepository<QCResult> repository,
                            QCResultRepository resultRepository,
                            QCControlPointRepository controlPointRepository,
                            OrdreFabricationRepository ofRepository,
-                           ModelMapper modelMapper, QCPlanRepository qcPlanRepository, OFService ofService) {
+                           ModelMapper modelMapper,
+                           QCPlanRepository qcPlanRepository,
+                           OFService ofService, OneSignalServiceImpl oneSignalService,
+                           SecurityClient securityClient) {
         super(repository, modelMapper);
         this.resultRepository = resultRepository;
         this.controlPointRepository = controlPointRepository;
@@ -41,6 +55,8 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
         this.modelMapper = modelMapper;
         this.qcPlanRepository = qcPlanRepository;
         this.ofService = ofService;
+        this.oneSignalService = oneSignalService;
+        this.securityClient = securityClient;
     }
 
     @Transactional
@@ -98,9 +114,37 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
         if (of.getQualityStatus() != QualityStatus.BLOCKED) {
             of.setQualityStatus(QualityStatus.BLOCKED);
             ofRepository.save(of);
+            try {
+                List<OSMUserDTO> responsables = securityClient.getUsersByRole("OSMADMIN").getBody();
+                log.info("Utilisateurs trouvés = {}", responsables.size());
+                List<String> userIds = responsables.stream()
+                        .map(OSMUserDTO::getOneSignalPlayerId)
+                        .filter(id -> id != null && !id.isBlank())
+                        .collect(Collectors.toList());
+
+                if (!userIds.isEmpty()) {
+                    String titre = "🚫 OF Bloqué";
+                    String message = String.format(
+                            "L'OF %s a été bloqué suite à un contrôle qualité non conforme.",
+                            of.getCode()
+                    );
+
+                    // ✅ FIX 3 : une seule map cohérente
+                    Map<String, String> data = Map.of(
+                            "screen", "OF_DETAIL",
+                            "ofId", ofId.toString()
+                    );
+                    log.info("Tenant courant : {}", TenantContext.getCurrentTenant());
+                    NotificationRequest notif =
+                            new NotificationRequest(userIds, titre, message, data);
+
+                    oneSignalService.sendNotification(notif);
+                }
+            } catch (Exception e) {
+                System.err.println("Erreur lors de l'envoi de la notification : " + e.getMessage());
+            }
         }
     }
-
 
     @Transactional
     public void verifierEtDebloquerOF(UUID ofId) {
@@ -129,6 +173,7 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
             ofRepository.save(of);
         }
     }
+
     @Transactional(readOnly = true)
     public List<QCResultDTO> getHistoriqueOF(UUID ofId) {
         return resultRepository.findByOfIdOrderByDateControleDesc(ofId)

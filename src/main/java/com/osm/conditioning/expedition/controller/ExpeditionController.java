@@ -84,6 +84,11 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         return ResponseEntity.ok(expeditionService.getById(id));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
+        return ResponseEntity.ok(expeditionService.getById(id));
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<ApiSingleResponse<Expedition, ExpeditionDto>> update(@PathVariable UUID id, @RequestBody ExpeditionDto dto) {
         ExpeditionUpdateRequest request = new ExpeditionUpdateRequest();

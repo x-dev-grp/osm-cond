@@ -1,6 +1,9 @@
 server:
   port: ${SERVER_PORT:8089}
   max-http-request-header-size: 32KB      # Boot 3.x+
+  error:
+    include-message: always
+    include-binding-errors: always
 
 
 spring:
@@ -11,7 +14,7 @@ spring:
     banner-mode: console
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/osmOC}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/osmoc}
     username: ${DB_USER:postgres}
     password: ${DB_PASS:root}
     driver-class-name: org.postgresql.Driver
@@ -82,7 +85,7 @@ logging:
     com.osm.oilproductionservice: DEBUG
     com.xdev: DEBUG
     org.springframework.security: DEBUG
-    org.springframework.web: ${LOG_LEVEL_WEB:INFO}
+    org.springframework.web: ${LOG_LEVEL_WEB:DEBUG}
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
     feign: DEBUG

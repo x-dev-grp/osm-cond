@@ -47,6 +47,18 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         request.setDestination(dto.getDestination());
         request.setPlannedShipDate(dto.getPlannedShipDate());
         request.setNotes(dto.getNotes());
+        if (dto.getLines() != null) {
+            request.setLines(dto.getLines().stream().map(line -> {
+                ExpeditionLineCreateRequest lineRequest = new ExpeditionLineCreateRequest();
+                lineRequest.setOfId(line.getOfId());
+                lineRequest.setArticleId(line.getArticleId());
+                lineRequest.setQuantity(line.getQuantity());
+                lineRequest.setVolume(line.getVolume());
+                lineRequest.setLotNumber(line.getLotNumber());
+                lineRequest.setUnit(line.getUnit());
+                return lineRequest;
+            }).toList());
+        }
         
         ExpeditionDto created = expeditionService.create(request);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -61,6 +73,11 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
     @GetMapping("/project/{projectId}/traceability")
     public ResponseEntity<Map<String, Object>> getProjectTraceability(@PathVariable UUID projectId) {
         return ResponseEntity.ok(expeditionService.getProjectTraceability(projectId));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
+        return ResponseEntity.ok(expeditionService.getById(id));
     }
 
     @PutMapping("/{id}")

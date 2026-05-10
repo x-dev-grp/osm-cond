@@ -8,6 +8,7 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.dto.ArticleSecDto;
+import com.osm.conditioning.dto.SKUDto;
 import com.osm.conditioning.dto.StockSecDto;
 import com.osm.conditioning.expedition.dto.*;
 import com.osm.conditioning.expedition.enums.ExpeditionStatus;
@@ -15,9 +16,11 @@ import com.osm.conditioning.expedition.model.Expedition;
 import com.osm.conditioning.expedition.model.ExpeditionArticle;
 import com.osm.conditioning.expedition.repository.ExpeditionArticleRepository;
 import com.osm.conditioning.expedition.repository.ExpeditionRepository;
+import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.projet.entity.Projet;
 import com.osm.conditioning.projet.repository.ProjetRepository;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
+import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
@@ -77,7 +80,12 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     @Override
     @Transactional(readOnly = true)
     public List<ExpeditionDto> findAll() {
-        return expeditionRepository.findAllByIsDeletedFalseOrderByCreatedDateDesc()
+        UUID tenantId = TenantContext.getCurrentTenant();
+        List<Expedition> expeditions = tenantId == null
+                ? expeditionRepository.findAllByIsDeletedFalseOrderByCreatedDateDesc()
+                : expeditionRepository.findAllByTenantIdAndIsDeletedFalseOrderByCreatedDateDesc(tenantId);
+
+        return expeditions
                 .stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
@@ -146,6 +154,11 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         expedition.setClientId(projet.getClient().getId());
         expedition.setStatus(ExpeditionStatus.DRAFT);
 
+        UUID tenantId = TenantContext.getCurrentTenant();
+        if (tenantId != null) {
+            expedition.setTenantId(tenantId);
+        }
+
         applyUpdatableFields(
                 expedition,
                 request.getDestination(),
@@ -157,6 +170,12 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
                 null,
                 null
         );
+
+        if (request.getLines() != null) {
+            for (ExpeditionLineCreateRequest lineRequest : request.getLines()) {
+                appendLine(expedition, lineRequest);
+            }
+        }
 
         Expedition saved = expeditionRepository.save(expedition);
 
@@ -209,44 +228,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         Expedition expedition = findExpedition(expeditionId);
         ensureEditable(expedition.getStatus());
 
-        Integer quantity = request.getQuantity() == null ? 0 : request.getQuantity();
-        if (quantity <= 0) {
-            throw new IllegalArgumentException("La quantite doit etre superieure a 0");
-        }
-
-        ArticleSecDto article = null;
-        if (request.getArticleId() != null) {
-            article = inventaireClient.getArticleById(request.getArticleId());
-            if (article == null) {
-                throw new IllegalArgumentException("Article introuvable : " + request.getArticleId());
-            }
-
-            StockSecDto stock = inventaireClient.getStockByArticle(request.getArticleId());
-            Integer available = stock != null ? stock.getQuantiteActuelle() : null;
-            if (available != null && quantity > available) {
-                throw new IllegalStateException("Quantite demandee superieure au stock disponible pour l'article " + request.getArticleId());
-            }
-        }
-
-        ExpeditionArticle line = new ExpeditionArticle();
-        line.setExpedition(expedition);
-        line.setOfId(request.getOfId());
-        
-        if (request.getOfId() != null) {
-            ofRepository.findById(request.getOfId()).ifPresent(of -> {
-                line.setOfCode(of.getCode());
-                // If article info is missing from request but present in OF, we could use it
-            });
-        }
-
-        line.setArticleId(request.getArticleId());
-        line.setArticleNameSnapshot(article != null ? article.getNom() : null);
-        line.setQuantity(quantity);
-        line.setVolume(request.getVolume());
-        line.setLotNumber(normalizeNullable(request.getLotNumber()));
-        line.setUnit(resolveUnit(request.getUnit()));
-
-        expedition.getLines().add(line);
+        appendLine(expedition, request);
         Expedition saved = expeditionRepository.save(expedition);
         return toDto(saved);
     }
@@ -281,6 +263,9 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         if (expedition.getLines().isEmpty()) {
             throw new IllegalStateException("Impossible de passer READY sans lignes");
         }
+
+        // Validate cumulative stock for all lines
+        validateExpeditionStock(expedition);
 
         expedition.setStatus(ExpeditionStatus.READY);
         appendActionComment(expedition, "READY", request);
@@ -476,6 +461,102 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     }
 
     /* ──────────────────────── PRIVATE HELPERS ──────────────────────── */
+
+    private void validateOfBelongsToProject(UUID ofId, UUID projectId) {
+        OrdreFabrication of = ofRepository.findById(ofId)
+                .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
+        if (!Objects.equals(of.getProjet().getId(), projectId)) {
+            throw new IllegalArgumentException("L'ordre de fabrication n'appartient pas au projet de l'expedition");
+        }
+    }
+
+    private void validateExpeditionStock(Expedition expedition) {
+        Map<UUID, Integer> articleQuantities = new HashMap<>();
+        for (ExpeditionArticle line : expedition.getLines()) {
+            if (line.getArticleId() != null) {
+                articleQuantities.merge(line.getArticleId(), line.getQuantity(), Integer::sum);
+            }
+        }
+
+        for (Map.Entry<UUID, Integer> entry : articleQuantities.entrySet()) {
+            UUID articleId = entry.getKey();
+            Integer requiredQuantity = entry.getValue();
+
+            StockSecDto stock = inventaireClient.getStockByArticle(articleId);
+            Integer available = stock != null ? stock.getQuantiteActuelle() : null;
+            if (available == null || available < requiredQuantity) {
+                throw new IllegalStateException("Stock insuffisant pour l'article " + articleId + " : disponible " + available + ", requis " + requiredQuantity);
+            }
+        }
+    }
+
+    private void appendLine(Expedition expedition, ExpeditionLineCreateRequest request) {
+        Integer quantity = request.getQuantity() == null ? 0 : request.getQuantity();
+        String lotNumber = normalizeNullable(request.getLotNumber());
+        String unit = resolveUnit(request.getUnit());
+
+        OrdreFabrication of = null;
+        if (request.getOfId() != null) {
+            validateOfBelongsToProject(request.getOfId(), expedition.getProjet().getId());
+            of = ofRepository.findById(request.getOfId())
+                    .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + request.getOfId()));
+
+            if ((quantity == null || quantity <= 0) && of.getQuantiteBonne() != null && of.getQuantiteBonne().signum() > 0) {
+                quantity = of.getQuantiteBonne().intValue();
+            }
+            if ((quantity == null || quantity <= 0) && of.getQuantiteCible() != null && of.getQuantiteCible().signum() > 0) {
+                quantity = of.getQuantiteCible().intValue();
+            }
+            if (lotNumber == null && of.getLotVracId() != null) {
+                lotNumber = of.getLotVracId().toString();
+            }
+        }
+
+        UUID articleId = request.getArticleId();
+        if (articleId == null && of != null && of.getLignes() != null && of.getLignes().size() == 1) {
+            articleId = of.getLignes().get(0).getArticleId();
+        }
+
+        ArticleSecDto article = null;
+        if (articleId != null) {
+            article = inventaireClient.getArticleById(articleId);
+            if (article == null) {
+                throw new IllegalArgumentException("Article introuvable : " + articleId);
+            }
+        }
+
+        if (quantity == null || quantity <= 0) {
+            throw new IllegalArgumentException("La quantite doit etre superieure a 0");
+        }
+
+        ExpeditionArticle line = new ExpeditionArticle();
+        line.setExpedition(expedition);
+        line.setOfId(request.getOfId());
+        line.setArticleId(articleId);
+        line.setOfCode(of != null ? of.getCode() : null);
+
+        if (article != null) {
+            line.setArticleNameSnapshot(article.getNom());
+        } else if (of != null && of.getSkuId() != null) {
+            try {
+                SKUDto sku = inventaireClient.getSkuById(of.getSkuId());
+                if (sku != null && sku.getCode() != null) {
+                    line.setArticleNameSnapshot(sku.getCode());
+                }
+            } catch (Exception ignored) {
+                if (line.getArticleNameSnapshot() == null) {
+                    line.setArticleNameSnapshot(of.getCode());
+                }
+            }
+        }
+
+        line.setQuantity(quantity);
+        line.setVolume(request.getVolume());
+        line.setLotNumber(lotNumber);
+        line.setUnit(unit);
+
+        expedition.getLines().add(line);
+    }
 
     private Expedition findExpedition(UUID expeditionId) {
         return expeditionRepository.findByIdAndIsDeletedFalse(expeditionId)

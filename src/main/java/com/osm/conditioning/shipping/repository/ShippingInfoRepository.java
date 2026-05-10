@@ -19,4 +19,6 @@ public interface ShippingInfoRepository extends BaseRepository<ShippingInfo> {
     Optional<ShippingInfo> findByShippingNumberIgnoreCaseAndIsDeletedFalse(String shippingNumber);
 
     List<ShippingInfo> findAllByIsDeletedFalseOrderByCreatedDateDesc();
+
+    List<ShippingInfo> findAllByTenantIdAndIsDeletedFalseOrderByCreatedDateDesc(UUID tenantId);
 }

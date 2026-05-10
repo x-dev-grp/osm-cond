@@ -1,6 +1,7 @@
 package com.osm.conditioning.repository;
 
 import com.osm.conditioning.Enum.StatutOF;
+import com.osm.conditioning.dto.analytics.OfAnalyticsProjection;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.xdev.xdevbase.repos.BaseRepository;
 import org.springframework.stereotype.Repository;
@@ -16,4 +17,5 @@ public interface OrdreFabricationRepository extends BaseRepository<OrdreFabricat
     List<OrdreFabrication> findByStatut(StatutOF statut);
     List<OrdreFabrication> findByDateDebutPrevueBetween(LocalDateTime debut, LocalDateTime fin);
     List<OrdreFabrication> findAllByProjetIdAndIsDeletedFalse(UUID projetId);
+    List<OfAnalyticsProjection> findByTenantIdAndIsDeletedFalse(UUID projetId);
 }

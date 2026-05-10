@@ -146,14 +146,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         BigDecimal quantiteCible = dto.getQuantiteCible();
 
         if (projet != null) {
-            // Validation de la quantité cumulée par rapport au projet
-            double sumExisting = projet.getOrdresFabrication().stream()
-                    .mapToDouble(o -> o.getQuantiteCible().doubleValue())
-                    .sum();
-
-            if (sumExisting + quantiteCible.doubleValue() > projet.getQuantiteCible()) {
-                throw new RuntimeException("La quantité cumulée des OF dépasse la quantité cible du projet (" + projet.getQuantiteCible() + ")");
-            }
+            validateProjectQuantity(projet, quantiteCible, null);
         }
 
         // Validation de la cuve d'huile (lot vrac)
@@ -199,6 +192,41 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         result.setQrUrl(qrInfo.getQrUrl());
         result.setQrImageBase64(qrInfo.getQrImageBase64());
         return result;
+    }
+
+    @Override
+    @Transactional
+    public OrdreFabricationDto update(OrdreFabricationDto dto) {
+        if (dto.getId() == null) {
+            throw new RuntimeException("L'ID est obligatoire pour la mise à jour");
+        }
+
+        OrdreFabrication of = ofRepository.findById(dto.getId())
+                .orElseThrow(() -> new EntityNotFoundException("OF non trouvé avec l'id : " + dto.getId()));
+
+        // Si la quantité cible ou le projet change, on valide
+        BigDecimal newQuantite = dto.getQuantiteCible() != null ? dto.getQuantiteCible() : of.getQuantiteCible();
+        UUID newProjectId = dto.getProjectId() != null ? dto.getProjectId() : (of.getProjet() != null ? of.getProjet().getId() : null);
+
+        if (newProjectId != null) {
+            com.osm.conditioning.projet.entity.Projet projet = projetService.findByIdOrThrow(newProjectId);
+            validateProjectQuantity(projet, newQuantite, of.getId());
+        }
+
+        return super.update(dto);
+    }
+
+    private void validateProjectQuantity(com.osm.conditioning.projet.entity.Projet projet, BigDecimal quantiteCible, UUID currentOfId) {
+        if (projet == null) return;
+
+        double sumExisting = projet.getOrdresFabrication().stream()
+                .filter(o -> currentOfId == null || !o.getId().equals(currentOfId))
+                .mapToDouble(o -> o.getQuantiteCible().doubleValue())
+                .sum();
+
+        if (sumExisting + quantiteCible.doubleValue() > projet.getQuantiteCible()) {
+            throw new RuntimeException("La quantité cumulée des OF dépasse la quantité cible du projet (" + projet.getQuantiteCible() + ")");
+        }
     }
     @Transactional
     public OrdreFabricationDto demarrerOF(UUID id) {

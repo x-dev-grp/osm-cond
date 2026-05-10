@@ -123,7 +123,7 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
                         .collect(Collectors.toList());
 
                 if (!userIds.isEmpty()) {
-                    String titre = "🚫 OF Bloqué";
+                    String titre = " OF Bloqué";
                     String message = String.format(
                             "L'OF %s a été bloqué suite à un contrôle qualité non conforme.",
                             of.getCode()
@@ -153,7 +153,7 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
         if (of.getQualityStatus() != QualityStatus.BLOCKED) {
             return;
         }
-        List<QCResult> allResults = resultRepository.findByOfIdOrderByDateControleDesc(ofId);
+        List<QCResult> allResults = resultRepository.findByOfIdAndTenantIdOrderByDateControleDesc(ofId, TenantContext.getCurrentTenant());
         QCPlan activePlan = qcPlanRepository.findByOfIdAndActifTrue(ofId)
                 .orElseThrow(() -> new RuntimeException("Aucun plan actif pour cet OF"));
         List<QCControlPoint> blockingPoints = controlPointRepository.findByPlanIdAndBlockingTrue(activePlan.getId());
@@ -176,7 +176,7 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
 
     @Transactional(readOnly = true)
     public List<QCResultDTO> getHistoriqueOF(UUID ofId) {
-        return resultRepository.findByOfIdOrderByDateControleDesc(ofId)
+        return resultRepository.findByOfIdAndTenantIdOrderByDateControleDesc(ofId, TenantContext.getCurrentTenant())
                 .stream()
                 .map(r -> modelMapper.map(r, QCResultDTO.class))
                 .collect(Collectors.toList());

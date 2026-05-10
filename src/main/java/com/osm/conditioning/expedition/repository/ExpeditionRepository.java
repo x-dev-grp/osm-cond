@@ -18,5 +18,7 @@ public interface ExpeditionRepository extends BaseRepository<Expedition> {
 
     List<Expedition> findAllByIsDeletedFalseOrderByCreatedDateDesc();
 
+    List<Expedition> findAllByTenantIdAndIsDeletedFalseOrderByCreatedDateDesc(UUID tenantId);
+
     List<Expedition> findAllByProjetIdAndIsDeletedFalseOrderByCreatedDateDesc(UUID projetId);
 }

@@ -3,7 +3,7 @@ package com.osm.conditioning.expedition.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.client.clientProductionStorage;
-import com.osm.conditioning.dto.ArticleSecDto;
+import com.osm.conditioning.dto.SKUDto;
 import com.osm.conditioning.expedition.dto.GenealogyDto;
 import com.osm.conditioning.expedition.model.Expedition;
 import com.osm.conditioning.expedition.model.ExpeditionArticle;
@@ -80,8 +80,8 @@ public class TraceabilityService {
             
             if (of.getSkuId() != null) {
                 try {
-                    ArticleSecDto art = inventaireClient.getArticleById(of.getSkuId());
-                    if (art != null) ofSnapshot.put("articleName", art.getNom());
+                    SKUDto sku = inventaireClient.getSkuById(of.getSkuId());
+                    if (sku != null) ofSnapshot.put("articleName", sku.getCode());
                 } catch (Exception e) {
                     log.warn("Could not fetch article name for SKU {}", of.getSkuId());
                 }
@@ -145,7 +145,13 @@ public class TraceabilityService {
                 if (line.getOfId() == null) {
                     continue;
                 }
-                ofRepository.findById(line.getOfId()).ifPresent(of -> ordered.put(of.getId(), of));
+                ofRepository.findById(line.getOfId()).ifPresent(of -> {
+                    if (Objects.equals(of.getProjet().getId(), expedition.getProjet().getId())) {
+                        ordered.put(of.getId(), of);
+                    } else {
+                        log.warn("OF {} does not belong to project {}, skipping in traceability", of.getId(), expedition.getProjet().getId());
+                    }
+                });
             }
         }
 

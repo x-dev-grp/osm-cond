@@ -4,12 +4,14 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.client.clientProductionDelivery;
+import com.osm.conditioning.client.clientProductionOilTransaction;
 import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.client.clientSecurityCompanyProfile;
 import com.osm.conditioning.dto.SKUDto;
 import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.LabelSource;
 import com.osm.conditioning.repository.LabelContentRepository;
+import com.osm.conditioning.repository.CertificationRepository;
 import com.xdev.communicator.models.enums.*;
 import com.xdev.communicator.models.shared.*;
 import com.xdev.xdevbase.config.TenantContext;
@@ -32,20 +34,20 @@ public class LabelContentService {
     private static final String DEFAULT_ORIGIN_COUNTRY = "Tunisie";
     private static final String DEFAULT_STORAGE_CONDITIONS = "A conserver a l'abri de la lumiere et de la chaleur";
     private static final DateTimeFormatter BEST_BEFORE_FORMATTER = DateTimeFormatter.ofPattern("MM/yyyy");
+
     private static final Map<QualityGrades, String> OFFICIAL_NAMES = Map.of(
             QualityGrades.EXTRA_VIRGIN, "Huile d'olive vierge extra",
             QualityGrades.VIRGIN, "Huile d'olive vierge",
             QualityGrades.REFINED, "Huile d'olive raffinee",
             QualityGrades.LAMPANTE, "Huile d'olive lampante",
-            QualityGrades.OTHER, "Huile d'olive"
-    );
+            QualityGrades.OTHER, "Huile d'olive");
+
     private static final Map<LabelClaimType, String> MARKETING_CLAIMS = Map.of(
             LabelClaimType.MADE_IN_TUNISIA, "Made in Tunisia",
             LabelClaimType.BIO, "BIO",
             LabelClaimType.COLD_EXTRACTION, "Extraction a froid",
             LabelClaimType.PRIVATE_LABEL, "Private Label",
-            LabelClaimType.OTHER, "Autre claim"
-    );
+            LabelClaimType.OTHER, "Autre claim");
 
     private final LabelContentRepository labelContentRepository;
     private final clientInventaire clientInventaire;
@@ -54,6 +56,7 @@ public class LabelContentService {
     private final clientSecurityCompanyProfile clientSecurityCompanyProfile;
     private final ObjectMapper objectMapper;
     private final CodeGenerator codeGenerator;
+    private final CertificationRepository certificationRepository;
 
     public LabelContentService(
             LabelContentRepository labelContentRepository,
@@ -62,8 +65,8 @@ public class LabelContentService {
             clientProductionDelivery clientProductionDelivery,
             clientSecurityCompanyProfile clientSecurityCompanyProfile,
             ObjectMapper objectMapper,
-            CodeGenerator codeGenerator
-    ) {
+            CodeGenerator codeGenerator,
+            CertificationRepository certificationRepository) {
         this.labelContentRepository = labelContentRepository;
         this.clientInventaire = clientInventaire;
         this.clientProductionStorage = clientProductionStorage;
@@ -71,34 +74,35 @@ public class LabelContentService {
         this.clientSecurityCompanyProfile = clientSecurityCompanyProfile;
         this.objectMapper = objectMapper;
         this.codeGenerator = codeGenerator;
+        this.certificationRepository = certificationRepository;
     }
 
-    private static LabelSourceSnapshotDto getLabelSourceSnapshotDto(LabelSource snapshot) {
-        LabelSourceSnapshotDto snapshotDto = new LabelSourceSnapshotDto();
-        snapshotDto.setId(snapshot.getId());
-        snapshotDto.setDeleted(snapshot.getDeleted());
-        snapshotDto.setExternalId(snapshot.getExternalId());
-        snapshotDto.setSourceType(snapshot.getSourceType());
-        snapshotDto.setSourceId(snapshot.getSourceId());
-        snapshotDto.setSourceBusinessKey(snapshot.getSourceBusinessKey());
-        snapshotDto.setSnapshotJson(snapshot.getSnapshotJson());
-        return snapshotDto;
+    @Transactional(readOnly = true)
+    public List<LabelContentDto> getAll() {
+        return labelContentRepository.findAll()
+                .stream()
+                .filter(labelContent -> !Boolean.TRUE.equals(labelContent.getDeleted()))
+                .map(labelContent -> toDto(labelContent, validateLabel(labelContent)))
+                .toList();
     }
 
-    //Récupère les informations
     @Transactional
     public LabelContentDto generate(LabelGenerateRequestDto request) {
         UserContext currentUser = fetchCurrentUser();
+
         ApiResponse<StorageUnitDto> response = clientProductionStorage.getStorageUnit(request.getLotId());
         if (response == null || response.getData() == null) {
             throw new EntityNotFoundException("Lot filtre introuvable");
         }
+
         StorageUnitDto storageUnit = response.getData();
         SKUDto packaging = clientInventaire.getSkuById(request.getPackagingId());
+
         UUID tenantId = TenantContext.getCurrentTenant();
         if (tenantId == null) {
-            return null;
+            throw new IllegalStateException("Tenant courant introuvable");
         }
+
         CompanyProfileDto companyProfile = clientSecurityCompanyProfile.getByTenantId(tenantId);
 
         LabelContent labelContent = new LabelContent();
@@ -107,9 +111,17 @@ public class LabelContentService {
         labelContent.setOperatorId(currentUser.id());
         labelContent.setLanguage(Optional.ofNullable(request.getLanguage()).orElse(LabelLanguage.FR));
         labelContent.setPackagingDate(Optional.ofNullable(request.getPackagingDate()).orElse(LocalDate.now()));
-        labelContent.setLabelCategory(request.getLabelCategory());
+        labelContent.setLabelCategory(Optional.ofNullable(request.getLabelCategory()).orElse(LabelCategory.UNIT));
+        labelContent.setStatus(LabelContentStatus.DRAFT);
 
         prepareLabelContent(labelContent, storageUnit, packaging, companyProfile);
+
+        applyRequestQualityAndVariety(
+                labelContent,
+                request.getQualityGrade(),
+                request.getVariety()
+        );
+
         saveSourceProofs(labelContent, storageUnit, packaging, currentUser, companyProfile);
 
         LabelContent saved = ensureQrCode(labelContentRepository.save(labelContent));
@@ -124,12 +136,10 @@ public class LabelContentService {
 
     @Transactional
     public LabelContentDto update(UUID id, LabelContentUpdateRequestDto request) {
-
         if (request == null) {
             throw new IllegalArgumentException("La requete de mise a jour est obligatoire");
         }
 
-        //cherche l'etiquette
         LabelContent labelContent = findLabelOrThrow(id);
 
         if (labelContent.getStatus() == LabelContentStatus.FINALIZED) {
@@ -141,37 +151,84 @@ public class LabelContentService {
         if (updated && labelContent.getStatus() == LabelContentStatus.VALIDATED) {
             labelContent.setStatus(LabelContentStatus.DRAFT);
         }
-        labelContent.setFinalPayloadJson(null);
 
-        //sauv dans la base
+        labelContent.setFinalPayloadJson(null);
+        labelContent.setFinalizedAt(null);
+        labelContent.setFinalizedBy(null);
+
+        LabelContent saved = labelContentRepository.save(labelContent);
+        return toDto(saved, validateLabel(saved));
+    }
+
+    @Transactional
+    public void delete(UUID id) {
+        LabelContent labelContent = findLabelOrThrow(id);
+
+        if (labelContent.getStatus() == LabelContentStatus.FINALIZED) {
+            throw new IllegalStateException(
+                    "Une etiquette finalisee ne peut pas etre supprimee pour garantir la tracabilite");
+        }
+
+        labelContent.setDeleted(true);
+        labelContentRepository.save(labelContent);
+    }
+
+    @Transactional
+    public LabelContentDto markAsDraft(UUID id) {
+        LabelContent labelContent = findLabelOrThrow(id);
+
+        if (labelContent.getStatus() == LabelContentStatus.FINALIZED) {
+            throw new IllegalStateException("Une etiquette finalisee ne peut pas etre remise en brouillon");
+        }
+
+        labelContent.setStatus(LabelContentStatus.DRAFT);
+        labelContent.setFinalPayloadJson(null);
+        labelContent.setFinalizedAt(null);
+        labelContent.setFinalizedBy(null);
+
         LabelContent saved = labelContentRepository.save(labelContent);
         return toDto(saved, validateLabel(saved));
     }
 
     @Transactional(readOnly = true)
     public LabelExportDto export(UUID id) {
-        return toExportDto(findLabelOrThrow(id));
+        LabelContent labelContent = findLabelOrThrow(id);
+
+        if (labelContent.getStatus() != LabelContentStatus.FINALIZED) {
+            throw new IllegalStateException("Seule une etiquette finalisee peut etre exportee");
+        }
+
+        return toExportDto(labelContent);
     }
 
     @Transactional
     public LabelContentDto validate(UUID id) {
         LabelContent labelContent = findLabelOrThrow(id);
+
         defaultLegalDenomination(labelContent);
+
         List<LabelValidationIssueDto> issues = validateLabel(labelContent);
+
         if (labelContent.getStatus() != LabelContentStatus.FINALIZED) {
             labelContent.setStatus(issues.isEmpty() ? LabelContentStatus.VALIDATED : LabelContentStatus.DRAFT);
         }
-        return toDto(labelContentRepository.save(labelContent), issues);
+
+        LabelContent saved = labelContentRepository.save(labelContent);
+        return toDto(saved, issues);
     }
 
     @Transactional
     public LabelContentDto approve(UUID id) {
         LabelContent labelContent = findLabelOrThrow(id);
+
         defaultLegalDenomination(labelContent);
+
         List<LabelValidationIssueDto> issues = validateLabel(labelContent);
+
         if (!issues.isEmpty()) {
             throw new IllegalStateException("Le contenu de l'etiquette contient des incoherences bloquantes");
         }
+
         if (labelContent.getStatus() == LabelContentStatus.FINALIZED && !isBlank(labelContent.getFinalPayloadJson())) {
             return toDto(labelContent, List.of());
         }
@@ -179,11 +236,12 @@ public class LabelContentService {
         labelContent.setStatus(LabelContentStatus.FINALIZED);
         labelContent.setFinalizedAt(LocalDateTime.now());
         labelContent.setFinalizedBy(fetchCurrentUser().login());
-        labelContent.setFinalPayloadJson(ExportJson(labelContent));
-        return toDto(labelContentRepository.save(labelContent), List.of());
+        labelContent.setFinalPayloadJson(exportJson(labelContent));
+
+        LabelContent saved = labelContentRepository.save(labelContent);
+        return toDto(saved, List.of());
     }
 
-    //l'etiquette existe , n'est pas supp , si problem
     private LabelContent findLabelOrThrow(UUID id) {
         return labelContentRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Label content introuvable pour l'id: " + id));
@@ -193,23 +251,26 @@ public class LabelContentService {
         if (!isBlank(labelContent.getQrHex())) {
             return labelContent;
         }
+
         labelContent.setQrHex(codeGenerator.generateUnique(labelContentRepository::existsByQrHex));
         return labelContentRepository.save(labelContent);
     }
 
-    //cherch les carateristique
     private SKUDto loadPackaging(UUID packagingId) {
         try {
-
+            return clientInventaire.getSkuById(packagingId);
         } catch (Exception ignored) {
+            throw new EntityNotFoundException("Packaging introuvable pour l'id: " + packagingId);
         }
-        throw new EntityNotFoundException("Packaging introuvable pour l'id: " + packagingId);
     }
 
-
-    //prend une etiquette vide et remplit auto avec tt les info
-    private void prepareLabelContent(LabelContent labelContent, StorageUnitDto storageUnit, SKUDto packaging, CompanyProfileDto companyProfile) {
+    private void prepareLabelContent(
+            LabelContent labelContent,
+            StorageUnitDto storageUnit,
+            SKUDto packaging,
+            CompanyProfileDto companyProfile) {
         labelContent.setLotNumber(storageUnit.getLotNumber());
+
         labelContent.setLegalDenomination(
                 Optional.ofNullable(officialName(storageUnit.getQualityGrade()))
                         .orElse(OFFICIAL_NAMES.get(QualityGrades.OTHER))
@@ -219,13 +280,15 @@ public class LabelContentService {
         labelContent.setBestBeforeDate(expiryDate(labelContent.getPackagingDate()));
         labelContent.setStorageConditions(DEFAULT_STORAGE_CONDITIONS);
         labelContent.setResponsibleName(companyProfile != null ? clean(companyProfile.getLegalName()) : null);
-        labelContent.setResponsibleAddress(companyProfile == null ? null : joinNonBlank(
+
+        labelContent.setResponsibleAddress(companyProfile == null ? null
+                : joinNonBlank(
                 companyProfile.getAddressLine1(),
                 companyProfile.getPostalCode(),
                 companyProfile.getCity(),
                 companyProfile.getGovernorate(),
-                DEFAULT_ORIGIN_COUNTRY
-        ));
+                DEFAULT_ORIGIN_COUNTRY));
+
         labelContent.setExtractionMethod(Olive_Oil_Type.OB.getName());
         labelContent.setSensoryProfile("Profil issu du controle qualite");
         labelContent.setClaimTypes(new LinkedHashSet<>());
@@ -233,8 +296,13 @@ public class LabelContentService {
         labelContent.setCertifications(new ArrayList<>());
     }
 
-    //approuver d'ou vienne les infos
-    private void saveSourceProofs(LabelContent labelContent, StorageUnitDto storageUnit, SKUDto packaging, UserContext currentUser, CompanyProfileDto companyProfile) {
+    private void saveSourceProofs(
+            LabelContent labelContent,
+            StorageUnitDto storageUnit,
+            SKUDto packaging,
+            UserContext currentUser,
+            CompanyProfileDto companyProfile
+    ) {
         labelContent.getSourceSnapshots().clear();
         addSnapshot(labelContent, LabelSourceType.FILTERED_LOT, storageUnit.getId(), storageUnit.getLotNumber(), storageUnit);
         addSnapshot(labelContent, LabelSourceType.PACKAGING, packaging.getId(), packaging.getCode(), packaging);
@@ -245,8 +313,12 @@ public class LabelContentService {
 
     }
 
-    //cree chaque preuve individuelle
-    private void addSnapshot(LabelContent labelContent, LabelSourceType type, UUID sourceId, String businessKey, Object payload) {
+    private void addSnapshot(
+            LabelContent labelContent,
+            LabelSourceType type,
+            UUID sourceId,
+            String businessKey,
+            Object payload) {
         LabelSource snapshot = new LabelSource();
         snapshot.setLabelContent(labelContent);
         snapshot.setSourceType(type);
@@ -262,114 +334,195 @@ public class LabelContentService {
         labelContent.getSourceSnapshots().add(snapshot);
     }
 
-    //Transformer une information sur la qualité de l'huile d’olive en dénomination légale officielle
-    // telle qu’elle doit apparaître sur l’étiquette
+    private boolean applyRequestQualityAndVariety(
+            LabelContent labelContent,
+            String qualityGrade,
+            String variety
+    ) {
+        boolean updated = false;
+
+        if (qualityGrade != null) {
+            String value = clean(qualityGrade);
+
+            if (!Objects.equals(value, labelContent.getQualityGrade())) {
+                labelContent.setQualityGrade(value);
+                updated = true;
+            }
+
+            String officialName = officialNameFromString(value);
+            if (!isBlank(officialName) && !Objects.equals(officialName, labelContent.getLegalDenomination())) {
+                labelContent.setLegalDenomination(officialName);
+                updated = true;
+            }
+        }
+
+        if (variety != null) {
+            String value = clean(variety);
+
+            if (!Objects.equals(value, labelContent.getVariety())) {
+                labelContent.setVariety(value);
+                updated = true;
+            }
+        }
+
+        return updated;
+    }
+
+    private String officialNameFromString(String qualityGrade) {
+        if (isBlank(qualityGrade)) {
+            return null;
+        }
+
+        String normalized = Normalizer.normalize(qualityGrade, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toUpperCase(Locale.ROOT)
+                .replace("'", "")
+                .replace("-", "")
+                .replace("_", "")
+                .replace(" ", "");
+
+        if (normalized.contains("EXTRAVIRGIN")
+                || (normalized.contains("EXTRA")
+                && (normalized.contains("VIRGIN") || normalized.contains("VIERGE")))) {
+            return OFFICIAL_NAMES.get(QualityGrades.EXTRA_VIRGIN);
+        }
+
+        if (normalized.equals("VIRGIN") || normalized.contains("VIERGE")) {
+            return OFFICIAL_NAMES.get(QualityGrades.VIRGIN);
+        }
+
+        if (normalized.contains("REFINED") || normalized.contains("RAFFINE")) {
+            return OFFICIAL_NAMES.get(QualityGrades.REFINED);
+        }
+
+        if (normalized.contains("LAMPANTE") || normalized.contains("LAMPANT")) {
+            return OFFICIAL_NAMES.get(QualityGrades.LAMPANTE);
+        }
+
+        if (normalized.contains("OLIVEOIL")
+                || normalized.equals("OLIVE")
+                || normalized.equals("OTHER")
+                || normalized.equals("POMACEOIL")) {
+            return OFFICIAL_NAMES.get(QualityGrades.OTHER);
+        }
+
+        return null;
+    }
+
     private String officialName(QualityGrades qualityGrade) {
-        if (qualityGrade != null) {
-            return Optional.ofNullable(OFFICIAL_NAMES.get(qualityGrade))
-                    .orElse(OFFICIAL_NAMES.get(QualityGrades.OTHER));
+        if (qualityGrade != null && OFFICIAL_NAMES.containsKey(qualityGrade)) {
+            return OFFICIAL_NAMES.get(qualityGrade);
         }
 
-        String category = "";
-        String normalized = "";
-        if (qualityGrade != null) {
-            normalized = Normalizer.normalize(qualityGrade.toString(), Normalizer.Form.NFD)
-                    .replaceAll("\\p{M}+", "")
-                    .toUpperCase(Locale.ROOT)
-                    .replace("'", "")
-                    .replace("-", "")
-                    .replace("_", "")
-                    .replace(" ", "");
-
-        } else {
-            normalized = "EXTRAVIRGIN";
-        }
+        String normalized = qualityGrade == null
+                ? "EXTRAVIRGIN"
+                : Normalizer.normalize(qualityGrade.toString(), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toUpperCase(Locale.ROOT)
+                .replace("'", "")
+                .replace("-", "")
+                .replace("_", "")
+                .replace(" ", "");
 
         if (normalized.contains("EXTRAVIRGIN")
                 || (normalized.contains("EXTRA") && (normalized.contains("VIRGIN") || normalized.contains("VIERGE")))) {
             return OFFICIAL_NAMES.get(QualityGrades.EXTRA_VIRGIN);
         }
+
         if (normalized.contains("VIRGIN") || normalized.contains("VIERGE")) {
             return OFFICIAL_NAMES.get(QualityGrades.VIRGIN);
         }
+
         if (normalized.contains("REFINED") || normalized.contains("RAFFINE")) {
             return OFFICIAL_NAMES.get(QualityGrades.REFINED);
         }
+
         if (normalized.contains("LAMPANTE") || normalized.contains("LAMPANT")) {
             return OFFICIAL_NAMES.get(QualityGrades.LAMPANTE);
         }
-        if (normalized.contains("OLIVEOIL") || normalized.contains("HUILEDOLIVE")) {
-            return OFFICIAL_NAMES.get(QualityGrades.OTHER);
-        }
-        return category;
+
+        return OFFICIAL_NAMES.get(QualityGrades.OTHER);
     }
 
-    //ML et L
     private String formatVolume(Float volume) {
         if (volume == null || volume <= 0) {
             return null;
         }
+
         if (volume >= 1000f) {
-            return volume % 1000f == 0  //f signifie que c'est un nombre décimal (Float)
+            return volume % 1000f == 0
                     ? String.format(Locale.ROOT, "%.0f L", volume / 1000f)
                     : String.format(Locale.ROOT, "%.2f L", volume / 1000f);
         }
+
         return String.format(Locale.ROOT, "%.0f ml", volume);
     }
 
-    //retourne la quantite totale sur l'etiquette
     private String calculateQuantity(SKUDto packaging, LabelCategory category) {
+        if (packaging == null) {
+            return null;
+        }
+
         float unitVolume = Optional.ofNullable(packaging.getVolume()).orElse(0f);
+
         if (category == LabelCategory.COLIS) {
             int unitsPerCase = Optional.ofNullable(packaging.getUnitesParCols()).orElse(1);
             return formatVolume(unitVolume * unitsPerCase) + " (" + unitsPerCase + " unites)";
         }
+
         if (category == LabelCategory.PALLET) {
             int unitsPerCase = Optional.ofNullable(packaging.getUnitesParCols()).orElse(1);
             int casesPerPallet = Optional.ofNullable(packaging.getColisParPalette()).orElse(1);
             int totalUnits = unitsPerCase * casesPerPallet;
             return formatVolume(unitVolume * totalUnits) + " (" + casesPerPallet + " colis)";
         }
+
         return formatVolume(unitVolume);
     }
 
-    //date limite de consommation
     private String expiryDate(LocalDate packagingDate) {
-        return packagingDate == null ? null : packagingDate.plusMonths(DEFAULT_SHELF_LIFE_MONTHS).format(BEST_BEFORE_FORMATTER);
+        return packagingDate == null
+                ? null
+                : packagingDate.plusMonths(DEFAULT_SHELF_LIFE_MONTHS).format(BEST_BEFORE_FORMATTER);
     }
 
     private List<String> marketingClaims(Set<LabelClaimType> claimTypes) {
         List<String> claims = new ArrayList<>();
+
+        if (claimTypes == null) {
+            return claims;
+        }
+
         for (LabelClaimType claimType : claimTypes) {
             String claim = MARKETING_CLAIMS.get(claimType);
             if (claim != null) {
                 claims.add(claim);
             }
         }
+
         return claims;
     }
 
-    //tchouflk tt les champs valider ouu nn
     private List<LabelValidationIssueDto> validateLabel(LabelContent labelContent) {
         List<LabelValidationIssueDto> issues = new ArrayList<>();
+
         validateNotNull(issues, labelContent.getLotId(), "lotId", "Lot filtre absent");
         validateNotNull(issues, labelContent.getPackagingId(), "packagingId", "Packaging absent");
         validateNotNull(issues, labelContent.getOperatorId(), "operatorId", "Utilisateur courant introuvable");
         validateNotBlank(issues, labelContent.getLotNumber(), "lotNumber", "Numero de lot indisponible");
-        validateNotBlank(issues, labelContent.getLegalDenomination(), "legalDenomination", "Denomination legale non mappee");
+        validateNotBlank(issues, labelContent.getLegalDenomination(), "legalDenomination",
+                "Denomination legale non mappee");
         validateNotBlank(issues, labelContent.getNetQuantity(), "netQuantity", "Quantite packaging absente");
         validateNotBlank(issues, labelContent.getBestBeforeDate(), "bestBeforeDate", "DDM non calculable");
         validateNotBlank(issues, labelContent.getResponsibleName(), "responsibleName", "Responsable non resolu");
-        validateNotBlank(issues, labelContent.getResponsibleAddress(), "responsibleAddress", "Adresse responsable indisponible");
-        for (LabelClaimType claimType : labelContent.getClaimTypes()) {
-            if (!claimSupported(labelContent, claimType)) {
-                issues.add(new LabelValidationIssueDto("claimTypes", "Le claim " + claimType.name() + " ne dispose pas d'une preuve suffisante", true));
-            }
-        }
+        validateNotBlank(issues, labelContent.getResponsibleAddress(), "responsibleAddress",
+                "Adresse responsable indisponible");
+
+        // Proof validation for marketing claims removed as per user request
+
         return issues;
     }
 
-    //les champs quand peut modifier
     private boolean applyUpdate(LabelContent labelContent, LabelContentUpdateRequestDto request) {
         boolean updated = false;
 
@@ -377,11 +530,21 @@ public class LabelContentService {
             labelContent.setLanguage(request.getLanguage());
             updated = true;
         }
+
         if (request.getPackagingDate() != null && !request.getPackagingDate().equals(labelContent.getPackagingDate())) {
             labelContent.setPackagingDate(request.getPackagingDate());
             labelContent.setBestBeforeDate(expiryDate(request.getPackagingDate()));
             updated = true;
         }
+
+        if (applyRequestQualityAndVariety(
+                labelContent,
+                request.getQualityGrade(),
+                request.getVariety()
+        )) {
+            updated = true;
+        }
+
         if (request.getLegalDenomination() != null) {
             String value = clean(request.getLegalDenomination());
             if (!Objects.equals(value, labelContent.getLegalDenomination())) {
@@ -389,6 +552,7 @@ public class LabelContentService {
                 updated = true;
             }
         }
+
         if (request.getStorageConditions() != null) {
             String value = clean(request.getStorageConditions());
             if (!Objects.equals(value, labelContent.getStorageConditions())) {
@@ -396,6 +560,7 @@ public class LabelContentService {
                 updated = true;
             }
         }
+
         if (request.getSensoryProfile() != null) {
             String value = clean(request.getSensoryProfile());
             if (!Objects.equals(value, labelContent.getSensoryProfile())) {
@@ -403,6 +568,7 @@ public class LabelContentService {
                 updated = true;
             }
         }
+
         if (request.getCertifications() != null) {
             List<String> certifications = normalizeStrings(request.getCertifications());
             if (!certifications.equals(labelContent.getCertifications())) {
@@ -410,6 +576,7 @@ public class LabelContentService {
                 updated = true;
             }
         }
+
         if (request.getClaimTypes() != null) {
             Set<LabelClaimType> claimTypes = normalizeClaimTypes(request.getClaimTypes());
             if (!claimTypes.equals(labelContent.getClaimTypes())) {
@@ -418,12 +585,75 @@ public class LabelContentService {
                 updated = true;
             }
         }
+
+        if (request.getMarketingClaims() != null) {
+            List<String> marketingClaims = normalizeStrings(request.getMarketingClaims());
+            if (!marketingClaims.equals(labelContent.getMarketingClaims())) {
+                labelContent.setMarketingClaims(marketingClaims);
+                updated = true;
+            }
+        }
+
+        if (request.getLotNumber() != null) {
+            String value = clean(request.getLotNumber());
+            if (!Objects.equals(value, labelContent.getLotNumber())) {
+                labelContent.setLotNumber(value);
+                updated = true;
+            }
+        }
+
+        if (request.getOriginCountry() != null) {
+            String value = clean(request.getOriginCountry());
+            if (!Objects.equals(value, labelContent.getOriginCountry())) {
+                labelContent.setOriginCountry(value);
+                updated = true;
+            }
+        }
+
+        if (request.getNetQuantity() != null) {
+            String value = clean(request.getNetQuantity());
+            if (!Objects.equals(value, labelContent.getNetQuantity())) {
+                labelContent.setNetQuantity(value);
+                updated = true;
+            }
+        }
+
+        if (request.getResponsibleName() != null) {
+            String value = clean(request.getResponsibleName());
+            if (!Objects.equals(value, labelContent.getResponsibleName())) {
+                labelContent.setResponsibleName(value);
+                updated = true;
+            }
+        }
+
+        if (request.getResponsibleAddress() != null) {
+            String value = clean(request.getResponsibleAddress());
+            if (!Objects.equals(value, labelContent.getResponsibleAddress())) {
+                labelContent.setResponsibleAddress(value);
+                updated = true;
+            }
+        }
+
+        if (request.getExtractionMethod() != null) {
+            String value = clean(request.getExtractionMethod());
+            if (!Objects.equals(value, labelContent.getExtractionMethod())) {
+                labelContent.setExtractionMethod(value);
+                updated = true;
+            }
+        }
+
+        if (request.getBestBeforeDate() != null) {
+            String value = clean(request.getBestBeforeDate());
+            if (!Objects.equals(value, labelContent.getBestBeforeDate())) {
+                labelContent.setBestBeforeDate(value);
+                updated = true;
+            }
+        }
+
         return updated;
     }
 
-    //transforme tt les champs d'une etiquette en une chaine json pour imprimer
-    private String ExportJson(LabelContent labelContent) {
-        // 1. Construire la map des données (anciennement payloadData)
+    private String exportJson(LabelContent labelContent) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("legalDenomination", labelContent.getLegalDenomination());
         payload.put("originCountry", labelContent.getOriginCountry());
@@ -433,78 +663,104 @@ public class LabelContentService {
         payload.put("responsibleName", labelContent.getResponsibleName());
         payload.put("responsibleAddress", labelContent.getResponsibleAddress());
         payload.put("lotNumber", labelContent.getLotNumber());
+        payload.put("variety", labelContent.getVariety());
+        payload.put("qualityGrade", labelContent.getQualityGrade());
         payload.put("extractionMethod", labelContent.getExtractionMethod());
         payload.put("sensoryProfile", labelContent.getSensoryProfile());
-        payload.put("certifications", labelContent.getCertifications());
+
+        // Merge certifications and marketing claims for the label display
+        Set<String> allCerts = new LinkedHashSet<>();
+        if (labelContent.getCertifications() != null)
+            allCerts.addAll(labelContent.getCertifications());
+        if (labelContent.getMarketingClaims() != null)
+            allCerts.addAll(labelContent.getMarketingClaims());
+        payload.put("certifications", new ArrayList<>(allCerts));
+
         payload.put("marketingClaims", labelContent.getMarketingClaims());
         payload.put("status", labelContent.getStatus().name());
         payload.put("publicCode", labelContent.getQrHex());
 
-        // 2. Convertir la map en JSON (anciennement writeJson)
+        // Enrich certifications with logos
+        List<Map<String, String>> certDetails = new ArrayList<>();
+        if (labelContent.getCertifications() != null) {
+            for (String certName : labelContent.getCertifications()) {
+                certificationRepository.findByNameAndIsDeletedFalse(certName).ifPresent(cert -> {
+                    Map<String, String> details = new HashMap<>();
+                    details.put("name", cert.getName());
+                    details.put("logoData", cert.getLogoData());
+                    details.put("logoContentType", cert.getLogoContentType());
+                    certDetails.add(details);
+                });
+            }
+        }
+        payload.put("certificationsDetail", certDetails);
+
         try {
             return objectMapper.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
-            throw new IllegalStateException("Impossible de sérialiser l'étiquette en JSON", e);
+            throw new IllegalStateException("Impossible de serialiser l'etiquette en JSON", e);
         }
     }
 
-    //donne un nom pour l'etiquette si ils absent
     private void defaultLegalDenomination(LabelContent labelContent) {
         if (isBlank(labelContent.getLegalDenomination())) {
             labelContent.setLegalDenomination(OFFICIAL_NAMES.get(QualityGrades.OTHER));
         }
     }
 
-    //verifi systematiquement si un champs nul
     private void validateNotNull(List<LabelValidationIssueDto> issues, Object value, String field, String message) {
         if (value == null) {
             issues.add(new LabelValidationIssueDto(field, message, true));
         }
     }
 
-    //La valeur n’est ni null, ni vide, ni composée uniquement d’espaces
     private void validateNotBlank(List<LabelValidationIssueDto> issues, String value, String field, String message) {
         if (isBlank(value)) {
             issues.add(new LabelValidationIssueDto(field, message, true));
         }
     }
 
-    //verifie les argument de marketing
     private boolean claimSupported(LabelContent labelContent, LabelClaimType claimType) {
         switch (claimType) {
             case MADE_IN_TUNISIA:
-                return DEFAULT_ORIGIN_COUNTRY.equalsIgnoreCase(Optional.ofNullable(labelContent.getOriginCountry()).orElse(""));
+                return DEFAULT_ORIGIN_COUNTRY.equalsIgnoreCase(
+                        Optional.ofNullable(labelContent.getOriginCountry()).orElse(""));
+
             case BIO:
-                boolean b = false;
-                for (String certification : labelContent.getCertifications()) {
-                    if ("BIO".equalsIgnoreCase(certification)) {
-                        b = true;
-                        break;
-                    }
-                }
-                return b;
+                if (labelContent.getCertifications() == null)
+                    return false;
+                List<String> bioKeys = List.of("BIO", "BIOLOGIQUE", "ORGANIC", "ECOCERT");
+                return labelContent.getCertifications().stream()
+                        .anyMatch(name -> bioKeys.stream().anyMatch(key -> name.toUpperCase().contains(key)));
+
             case COLD_EXTRACTION:
-                return Optional.ofNullable(labelContent.getExtractionMethod()).orElse("").toLowerCase(Locale.ROOT).contains("froid");
+                return Optional.ofNullable(labelContent.getExtractionMethod())
+                        .orElse("")
+                        .toLowerCase(Locale.ROOT)
+                        .contains("froid");
+
             case PRIVATE_LABEL:
                 return !isBlank(labelContent.getResponsibleName());
+
             case OTHER:
             default:
                 return false;
         }
     }
 
-    // chercher l’utilisateur actuellement connecté
     private UserContext fetchCurrentUser() {
         Map<String, Object> currentUser = SecurityUtils.getCurrentOsmUser()
                 .map(LinkedHashMap::new)
                 .orElseThrow(() -> new IllegalStateException("Utilisateur courant introuvable"));
 
         String rawId = stringValue(currentUser.get("id"));
+
         if (rawId == null) {
             throw new IllegalStateException("Identifiant utilisateur courant introuvable");
         }
 
         UUID userId;
+
         try {
             userId = UUID.fromString(rawId);
         } catch (IllegalArgumentException e) {
@@ -515,18 +771,23 @@ public class LabelContentService {
         String email = stringValue(currentUser.get("email"));
         String login = username != null ? username : email != null ? email : rawId;
 
-        String displayName = joinNonBlank(stringValue(currentUser.get("firstName")), stringValue(currentUser.get("lastName")));
+        String displayName = joinNonBlank(
+                stringValue(currentUser.get("firstName")),
+                stringValue(currentUser.get("lastName")));
+
         if (isBlank(displayName)) {
             displayName = username != null ? username : email != null ? email : rawId;
         }
 
         Map<String, Object> snapshot = new LinkedHashMap<>();
+
         for (String key : List.of("id", "username", "firstName", "lastName", "email", "phoneNumber")) {
             String value = stringValue(currentUser.get(key));
             if (value != null) {
                 snapshot.put(key, value);
             }
         }
+
         if (snapshot.isEmpty()) {
             snapshot.putAll(currentUser);
         }
@@ -534,11 +795,11 @@ public class LabelContentService {
         return new UserContext(userId, login, displayName, snapshot);
     }
 
-    //supp et netoyer les espace
     private String clean(String value) {
         if (value == null) {
             return null;
         }
+
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
     }
@@ -549,35 +810,45 @@ public class LabelContentService {
 
     private String joinNonBlank(String... values) {
         StringBuilder builder = new StringBuilder();
+
         for (String value : values) {
             String cleaned = clean(value);
+
             if (cleaned == null) {
                 continue;
             }
+
             if (builder.length() > 0) {
                 builder.append(", ");
             }
+
             builder.append(cleaned);
         }
+
         return builder.toString();
     }
 
     private List<String> normalizeStrings(List<String> values) {
         List<String> result = new ArrayList<>();
+
         if (values == null) {
             return result;
         }
+
         for (String value : values) {
             String cleaned = clean(value);
+
             if (cleaned != null && !result.contains(cleaned)) {
                 result.add(cleaned);
             }
         }
+
         return result;
     }
 
     private Set<LabelClaimType> normalizeClaimTypes(Set<LabelClaimType> claimTypes) {
         Set<LabelClaimType> result = new LinkedHashSet<>();
+
         if (claimTypes != null) {
             for (LabelClaimType claimType : claimTypes) {
                 if (claimType != null) {
@@ -585,6 +856,7 @@ public class LabelContentService {
                 }
             }
         }
+
         return result;
     }
 
@@ -592,9 +864,9 @@ public class LabelContentService {
         return value == null || value.isBlank();
     }
 
-    //transforme l'etiquette interne en un package pret pour l'impression
     private LabelExportDto toExportDto(LabelContent labelContent) {
         LabelExportDto dto = new LabelExportDto();
+
         dto.setLabelId(labelContent.getId());
         dto.setStatus(labelContent.getStatus());
         dto.setLanguage(labelContent.getLanguage());
@@ -607,21 +879,26 @@ public class LabelContentService {
         dto.setResponsibleName(labelContent.getResponsibleName());
         dto.setResponsibleAddress(labelContent.getResponsibleAddress());
         dto.setLotNumber(labelContent.getLotNumber());
+        dto.setVariety(labelContent.getVariety());
+        dto.setQualityGrade(labelContent.getQualityGrade());
         dto.setExtractionMethod(labelContent.getExtractionMethod());
         dto.setSensoryProfile(labelContent.getSensoryProfile());
-        dto.setCertifications(new ArrayList<>(labelContent.getCertifications()));
-        dto.setClaimTypes(new LinkedHashSet<>(labelContent.getClaimTypes()));
-        dto.setMarketingClaims(new ArrayList<>(labelContent.getMarketingClaims()));
-        dto.setFrozen(labelContent.getStatus() == LabelContentStatus.FINALIZED && !isBlank(labelContent.getFinalPayloadJson()));
-        dto.setPayloadJson(dto.isFrozen() ? labelContent.getFinalPayloadJson() : ExportJson(labelContent));
+        dto.setCertifications(new ArrayList<>(safeList(labelContent.getCertifications())));
+        dto.setClaimTypes(new LinkedHashSet<>(safeSet(labelContent.getClaimTypes())));
+        dto.setMarketingClaims(new ArrayList<>(safeList(labelContent.getMarketingClaims())));
+        dto.setFrozen(labelContent.getStatus() == LabelContentStatus.FINALIZED
+                && !isBlank(labelContent.getFinalPayloadJson()));
+        dto.setPayloadJson(dto.isFrozen() ? labelContent.getFinalPayloadJson() : exportJson(labelContent));
         dto.setFinalizedAt(labelContent.getFinalizedAt());
         dto.setFinalizedBy(labelContent.getFinalizedBy());
         dto.setPublicCode(labelContent.getQrHex());
+
         return dto;
     }
 
     private LabelContentDto toDto(LabelContent labelContent, List<LabelValidationIssueDto> validationIssues) {
         LabelContentDto dto = new LabelContentDto();
+
         dto.setId(labelContent.getId());
         dto.setDeleted(labelContent.getDeleted());
         dto.setExternalId(labelContent.getExternalId());
@@ -639,11 +916,13 @@ public class LabelContentService {
         dto.setResponsibleName(labelContent.getResponsibleName());
         dto.setResponsibleAddress(labelContent.getResponsibleAddress());
         dto.setLotNumber(labelContent.getLotNumber());
+        dto.setVariety(labelContent.getVariety());
+        dto.setQualityGrade(labelContent.getQualityGrade());
         dto.setExtractionMethod(labelContent.getExtractionMethod());
         dto.setSensoryProfile(labelContent.getSensoryProfile());
-        dto.setCertifications(new ArrayList<>(labelContent.getCertifications()));
-        dto.setClaimTypes(new LinkedHashSet<>(labelContent.getClaimTypes()));
-        dto.setMarketingClaims(new ArrayList<>(labelContent.getMarketingClaims()));
+        dto.setCertifications(new ArrayList<>(safeList(labelContent.getCertifications())));
+        dto.setClaimTypes(new LinkedHashSet<>(safeSet(labelContent.getClaimTypes())));
+        dto.setMarketingClaims(new ArrayList<>(safeList(labelContent.getMarketingClaims())));
         dto.setFinalPayloadJson(labelContent.getFinalPayloadJson());
         dto.setFinalizedAt(labelContent.getFinalizedAt());
         dto.setFinalizedBy(labelContent.getFinalizedBy());
@@ -651,12 +930,37 @@ public class LabelContentService {
         dto.setValidationIssues(validationIssues);
 
         List<LabelSourceSnapshotDto> sourceSnapshotDtos = new ArrayList<>();
-        for (LabelSource snapshot : labelContent.getSourceSnapshots()) {
-            LabelSourceSnapshotDto snapshotDto = getLabelSourceSnapshotDto(snapshot);
-            sourceSnapshotDtos.add(snapshotDto);
+
+        if (labelContent.getSourceSnapshots() != null) {
+            for (LabelSource snapshot : labelContent.getSourceSnapshots()) {
+                sourceSnapshotDtos.add(getLabelSourceSnapshotDto(snapshot));
+            }
         }
+
         dto.setSourceSnapshots(sourceSnapshotDtos);
+
         return dto;
     }
 
+    private static LabelSourceSnapshotDto getLabelSourceSnapshotDto(LabelSource snapshot) {
+        LabelSourceSnapshotDto snapshotDto = new LabelSourceSnapshotDto();
+
+        snapshotDto.setId(snapshot.getId());
+        snapshotDto.setDeleted(snapshot.getDeleted());
+        snapshotDto.setExternalId(snapshot.getExternalId());
+        snapshotDto.setSourceType(snapshot.getSourceType());
+        snapshotDto.setSourceId(snapshot.getSourceId());
+        snapshotDto.setSourceBusinessKey(snapshot.getSourceBusinessKey());
+        snapshotDto.setSnapshotJson(snapshot.getSnapshotJson());
+
+        return snapshotDto;
+    }
+
+    private List<String> safeList(List<String> values) {
+        return values == null ? List.of() : values;
+    }
+
+    private Set<LabelClaimType> safeSet(Set<LabelClaimType> values) {
+        return values == null ? Set.of() : values;
+    }
 }

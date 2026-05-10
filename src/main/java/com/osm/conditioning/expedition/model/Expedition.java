@@ -57,7 +57,6 @@ public class Expedition extends BaseEntity {
     private Integer totalQuantity;
     private BigDecimal totalVolume;
 
-    private String publicCode;
     /* Transport / shipping fields merged from ShippingInfo. */
 
     @Column(length = 120)

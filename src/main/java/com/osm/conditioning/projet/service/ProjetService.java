@@ -4,6 +4,7 @@ import com.osm.conditioning.projet.dto.ProjetDto;
 import com.osm.conditioning.projet.entity.Projet;
 import com.osm.conditioning.projet.entity.ProjetClient;
 import com.osm.conditioning.projet.repository.ProjetRepository;
+import com.osm.conditioning.shipping.service.ShippingInfoService;
 
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
@@ -32,17 +33,20 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     private final ProjetRepository projetRepository;
     private final ProjetClientService projetClientService;
+    private final ShippingInfoService shippingInfoService;
 
     public ProjetService(
             BaseRepository<Projet> repository,
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
-            ProjetClientService projetClientService
+            ProjetClientService projetClientService,
+            ShippingInfoService shippingInfoService
     ) {
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
         this.projetClientService = projetClientService;
+        this.shippingInfoService = shippingInfoService;
     }
 
     @Override
@@ -207,6 +211,8 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             saved.setQrImageBase64(qrInfo.getQrImageBase64());
             saved = projetRepository.save(saved);
         }
+
+        shippingInfoService.ensureShippingInfoForProject(saved);
 
         return toDto(saved);
     }

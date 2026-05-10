@@ -12,6 +12,7 @@ import com.osm.conditioning.shipping.model.ShippingInfo;
 import com.osm.conditioning.shipping.model.ShippingLine;
 import com.osm.conditioning.shipping.repository.ShippingInfoRepository;
 import com.osm.conditioning.shipping.repository.ShippingLineRepository;
+import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
@@ -59,7 +60,12 @@ public class ShippingInfoService extends BaseServiceImpl<ShippingInfo, ShippingI
     @Override
     @Transactional(readOnly = true)
     public List<ShippingInfoDto> findAll() {
-        return shippingInfoRepository.findAllByIsDeletedFalseOrderByCreatedDateDesc()
+        UUID tenantId = TenantContext.getCurrentTenant();
+        List<ShippingInfo> shippings = tenantId == null
+                ? shippingInfoRepository.findAllByIsDeletedFalseOrderByCreatedDateDesc()
+                : shippingInfoRepository.findAllByTenantIdAndIsDeletedFalseOrderByCreatedDateDesc(tenantId);
+
+        return shippings
                 .stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
@@ -178,6 +184,11 @@ public class ShippingInfoService extends BaseServiceImpl<ShippingInfo, ShippingI
                     created.setShippingNumber(generateShippingNumber());
                     created.setProjet(projet);
                     created.setStatus(ShippingStatus.DRAFT);
+                    if (projet.getTenantId() != null) {
+                        created.setTenantId(projet.getTenantId());
+                    } else if (TenantContext.getCurrentTenant() != null) {
+                        created.setTenantId(TenantContext.getCurrentTenant());
+                    }
 
                     ShippingEvent event = new ShippingEvent();
                     event.setShippingInfo(created);

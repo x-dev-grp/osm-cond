@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 import java.util.List;
 
-@FeignClient(name = "osm-sec", url = "${security.service.url:http://localhost:8088}")// ou url via configuration
+@FeignClient(name = "osm-sec", url = "${security.service.url:http://localhost:8088}", configuration = com.xdev.xdevsecurity.config.FeignConfiguration.class)// ou url via configuration
 public interface SecurityClient {
 
     @GetMapping("/api/security/user/role/{roleName}")

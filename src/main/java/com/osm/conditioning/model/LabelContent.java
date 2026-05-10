@@ -56,6 +56,8 @@ public class LabelContent extends BaseEntity {
     private String responsibleAddress;
 
     private String lotNumber;
+    private String variety;
+    private String qualityGrade;
     private String extractionMethod;
     private String sensoryProfile;
 

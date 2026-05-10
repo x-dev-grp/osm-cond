@@ -6,5 +6,5 @@ import java.util.List;
 import java.util.UUID;
 
 public interface QCResultRepository extends BaseRepository<QCResult> {
-    List<QCResult> findByOfIdOrderByDateControleDesc(UUID ofId);
+    List<QCResult> findByOfIdAndTenantIdOrderByDateControleDesc(UUID ofId, UUID tenantId);
 }

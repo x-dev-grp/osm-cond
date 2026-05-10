@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 import java.util.UUID;
 
-@FeignClient(name = "oilproductionservice", contextId = "labelStorageClient", url = "${production.service.url}")
+@FeignClient(name = "oilproductionservice", contextId = "labelStorageClient", url = "${production.service.url}", configuration = com.xdev.xdevsecurity.config.FeignConfiguration.class)
 public interface clientProductionStorage {
 
     @GetMapping("/api/production/storage-units/fetch/{id}")

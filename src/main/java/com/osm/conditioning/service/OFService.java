@@ -354,6 +354,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 of.setMotifNC(dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
             }
         }
+
         of.setQuantiteBonne(of.getQuantiteBonne().add(dto.getQuantiteBonne()));
         of.setQuantiteNC(of.getQuantiteNC().add(dto.getQuantiteNC()));
         if (of.getQuantiteBonne().compareTo(of.getQuantiteCible()) >= 0) {

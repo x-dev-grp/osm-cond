@@ -32,6 +32,8 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
+    private final ProjetClientService projetClientService;
+    private final ShippingInfoService shippingInfoService;
     private final ClientService clientService;
     private final ProjetClientService projetClientService;
     private final ShippingInfoService shippingInfoService;
@@ -41,11 +43,15 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
+            ProjetClientService projetClientService,
+            ShippingInfoService shippingInfoService
             ClientService clientService
              ShippingInfoService shippingInfoService
     ) {
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
+        this.projetClientService = projetClientService;
+        this.shippingInfoService = shippingInfoService;
         this.clientService = clientService;
          this.shippingInfoService = shippingInfoService;
     }
@@ -62,7 +68,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     @Override
     @Transactional(readOnly = true)
     public QrResolveResponse resolve(String publicCode) {
-
         if (publicCode == null || publicCode.isBlank()) {
             throw new IllegalArgumentException("Le code est obligatoire");
         }

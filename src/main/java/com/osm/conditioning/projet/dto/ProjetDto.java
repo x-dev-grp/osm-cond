@@ -25,7 +25,7 @@ public class ProjetDto extends BaseDto<Projet> {
 
     private ClientDto client;
 
-    @JsonAlias({"client_id", "projetClientId", "projet_client_id"})
+    @JsonAlias({"client_id", "projetClientId", "client_id"})
     private UUID clientId;
 
     private TypeProduit typeProduit;

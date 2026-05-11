@@ -12,7 +12,7 @@ import java.util.UUID;
 public interface ProjetRepository extends BaseRepository<Projet> {
 
     Optional<Projet> findByQrHex(String qrHex);
-
+    boolean existsByQrHex(String qrHex);
     Optional<Projet> findByQrHexAndTenantIdAndIsDeletedFalse(String qrHex, UUID tenantId);
 
     Optional<Projet> findByCodeAndTenantIdAndIsDeletedFalse(String code, UUID tenantId);

@@ -25,11 +25,7 @@ public class ProjetDto extends BaseDto<Projet> {
 
     private String code;
 
-    @NotNull(message = "Le client est obligatoire")
-    private UUID clientId;
-
-    private String clientNom;
-    private String clientEmail;
+    private ClientDto client;
 
     private TypeProduit typeProduit;
 

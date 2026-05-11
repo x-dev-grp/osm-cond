@@ -3,6 +3,7 @@ package com.osm.conditioning.projet.dto;
 
 
 import com.osm.conditioning.projet.entity.Client;
+import com.xdev.communicator.models.enums.ClientType;
 import com.xdev.xdevbase.dtos.BaseDto;
 import lombok.*;
 
@@ -29,4 +30,6 @@ public class ClientDto extends BaseDto<Client> implements Serializable {
     private String numeroTva;
     private String notes;
     private Boolean actif = true;
+    private String qrImageBase64;
+    private ClientType type;
 }

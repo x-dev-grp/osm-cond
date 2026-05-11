@@ -2,6 +2,7 @@ package com.osm.conditioning.projet.entity;
 
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.xdev.communicator.models.enums.ClientType;
 import com.xdev.xdevbase.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -23,7 +24,9 @@ public class Client extends BaseEntity {
 
     @Column( unique = true)
     private String codeClient;
-
+    @Enumerated(EnumType.STRING)
+    @Column( nullable = false)
+    private ClientType type;
     private String email;
 
     private String telephone;

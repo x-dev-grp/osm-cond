@@ -199,7 +199,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         payload.put("publicCode", expedition.getQrHex());
         payload.put("expeditionNumber", expedition.getExpeditionNumber());
         payload.put("status", expedition.getStatus() != null ? expedition.getStatus().name() : null);
-        payload.put("clientId", expedition.getClientId());
+        payload.put("clientId", expedition.getId());
 
         if (expedition.getProjet() != null) {
             payload.put("projetId", expedition.getProjet().getId());
@@ -623,7 +623,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         ExpeditionDto dto = new ExpeditionDto();
         dto.setId(expedition.getId());
         dto.setExpeditionNumber(expedition.getExpeditionNumber());
-        dto.setClientId(expedition.getClientId());
+        dto.setClientId(expedition.getId());
         dto.setStatus(expedition.getStatus());
         dto.setDestination(expedition.getDestination());
         dto.setPlannedShipDate(expedition.getPlannedShipDate());

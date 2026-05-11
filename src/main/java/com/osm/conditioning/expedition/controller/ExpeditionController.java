@@ -64,10 +64,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiSingleResponse<>(true, "Expedition created successfully", created));
     }
-    @GetMapping("/{id}")
-    public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
-        return ResponseEntity.ok(expeditionService.getById(id));
-    }
+
 
     @GetMapping("/project/{projectId}")
     public ResponseEntity<List<ExpeditionDto>> getByProject(@PathVariable UUID projectId) {
@@ -78,7 +75,6 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
     public ResponseEntity<Map<String, Object>> getProjectTraceability(@PathVariable UUID projectId) {
         return ResponseEntity.ok(expeditionService.getProjectTraceability(projectId));
     }
-
     @GetMapping("/{id}")
     public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(expeditionService.getById(id));

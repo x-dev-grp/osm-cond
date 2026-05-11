@@ -30,7 +30,7 @@ public class Projet extends BaseEntity implements Serializable {
     private List<OrdreFabrication> ordresFabrication = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "projet_client_id", nullable = false)
+    @JoinColumn(name = "client_id", nullable = false)
     private Client client;
 
     @Enumerated(EnumType.STRING)

@@ -1,8 +1,10 @@
 package com.osm.conditioning.projet.service;
 
+import com.osm.conditioning.projet.dto.ClientDto;
 import com.osm.conditioning.projet.dto.ProjetDto;
 import com.osm.conditioning.projet.entity.Client;
 import com.osm.conditioning.projet.entity.Projet;
+import com.osm.conditioning.projet.repository.ClientRepository;
 import com.osm.conditioning.projet.repository.ProjetRepository;
 import com.osm.conditioning.shipping.service.ShippingInfoService;
 
@@ -32,28 +34,22 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
-    private final ProjetClientService projetClientService;
-    private final ShippingInfoService shippingInfoService;
+     private final ShippingInfoService shippingInfoService;
     private final ClientService clientService;
-    private final ProjetClientService projetClientService;
-    private final ShippingInfoService shippingInfoService;
-
+    private final ClientRepository clientRepository;
     public ProjetService(
             BaseRepository<Projet> repository,
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
-            ProjetClientService projetClientService,
-            ShippingInfoService shippingInfoService
-            ClientService clientService
-             ShippingInfoService shippingInfoService
+            ShippingInfoService shippingInfoService,
+            ClientService clientService, ClientRepository clientRepository
     ) {
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
-        this.projetClientService = projetClientService;
-        this.shippingInfoService = shippingInfoService;
         this.clientService = clientService;
          this.shippingInfoService = shippingInfoService;
+        this.clientRepository = clientRepository;
     }
 
     @Override
@@ -198,25 +194,34 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     @Transactional
     public ProjetDto create(ProjetDto dto) {
-        Client client = clientService.findClientEntityById(dto.getClientId());
+        if (dto.getClient() == null || dto.getClient().getId() == null) {
+            throw new IllegalArgumentException("Client is required");
+        }
+
+        Client client = clientRepository.findById(dto.getClient().getId())
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Client not found with id: " + dto.getClient().getId()
+                ));
 
         Projet projet = new Projet();
         projet.setCode(generateCode());
         projet.setClient(client);
+
         applyBusinessFields(projet, dto);
 
         UUID tenantId = TenantContext.getCurrentTenant();
-
         if (tenantId != null) {
             projet.setTenantId(tenantId);
         }
 
-        Projet saved = projetRepository.save(projet);
+        Projet saved = projetRepository.saveAndFlush(projet);
 
         if (saved.getQrHex() == null || saved.getQrHex().isBlank()) {
             QrCodeInfo qrInfo = generateQrInfo(getEntityType(), saved.getId());
+
             saved.setQrHex(qrInfo.getPublicCode());
             saved.setQrImageBase64(qrInfo.getQrImageBase64());
+
             saved = projetRepository.save(saved);
         }
 
@@ -224,7 +229,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
         return toDto(saved);
     }
-
     @Override
     @Transactional
     public ProjetDto save(ProjetDto dto) {
@@ -237,7 +241,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() ->
                         new EntityNotFoundException("Projet non trouve : " + id));
-        Client client = clientService.findClientEntityById(dto.getClientId());
+        Client client = clientService.findClientEntityById(dto.getId());
 
         projet.setClient(client);
 
@@ -389,9 +393,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         dto.setCode(projet.getCode());
 
         if (projet.getClient() != null) {
-            dto.setClientId(projet.getClient().getId());
-            dto.setClientNom(projet.getClient().getNom());
-            dto.setClientEmail(projet.getClient().getEmail());
+            dto.setClient(modelMapper.map(projet.getClient(), ClientDto.class));
         }
 
         dto.setTypeProduit(projet.getTypeProduit());

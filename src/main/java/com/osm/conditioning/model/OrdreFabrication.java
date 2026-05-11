@@ -16,10 +16,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import org.hibernate.envers.Audited;
+
 @Entity
 @Table(name = "ordre_fabrication")
 @Getter
 @Setter
+@Audited
 public class OrdreFabrication extends BaseEntity implements Serializable {
 
     @Column(unique = true, nullable = false)

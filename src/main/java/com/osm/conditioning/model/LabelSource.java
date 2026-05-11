@@ -5,6 +5,7 @@ import com.xdev.xdevbase.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.envers.Audited;
 
 import java.util.UUID;
 
@@ -12,6 +13,7 @@ import java.util.UUID;
 @Table(name = "label_source_snapshot")
 @Getter
 @Setter
+@Audited
 public class LabelSource extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)

@@ -6,6 +6,7 @@ import com.xdev.xdevbase.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.envers.Audited;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -15,6 +16,7 @@ import java.util.List;
 @Entity
 @Getter
 @Setter
+@Audited
 public class ShippingInfo extends BaseEntity {
 
     @Column(name = "shipping_number", nullable = false, unique = true, length = 80)

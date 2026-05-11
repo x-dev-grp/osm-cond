@@ -342,23 +342,25 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         if (of.getQualityStatus() == QualityStatus.BLOCKED) {
             throw new RuntimeException("La saisie de production n'est possible pour  un OF bloqué par la qualité");
         }
-
         if (dto.getQuantiteNC() != null && dto.getQuantiteNC().compareTo(BigDecimal.ZERO) > 0) {
             if (dto.getMotifNC() == null || dto.getMotifNC().trim().isEmpty()) {
                 throw new RuntimeException("Le motif est obligatoire pour les produits non conformes (NC)");
             }
             if (of.getMotifNC() != null && !of.getMotifNC().isEmpty()) {
-                 of.setMotifNC(of.getMotifNC() + " | " + dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
-             } else {
-                 of.setMotifNC(dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
-             }
+                of.setMotifNC(of.getMotifNC() + " | " + dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
+            } else {
+                of.setMotifNC(dto.getMotifNC() + " (" + dto.getQuantiteNC() + ")");
+            }
         }
-
         of.setQuantiteBonne(of.getQuantiteBonne().add(dto.getQuantiteBonne()));
         of.setQuantiteNC(of.getQuantiteNC().add(dto.getQuantiteNC()));
+        if (of.getQuantiteBonne().compareTo(of.getQuantiteCible()) >= 0) {
+            return this.cloturerOF(id);
+        }
 
         return convertToDto(ofRepository.save(of));
     }
+
     @Transactional
     public OrdreFabricationDto ajusterConsommation(UUID id, AjustementConsommationDto ajustement) {
         OrdreFabrication of = ofRepository.findById(id)
@@ -419,16 +421,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return dto;
     }
 
-
-
-
-
-
     private String generateCode() {
         return "OF-" + System.currentTimeMillis();
     }
-
-
 
     @Override
     @Transactional(readOnly = true)
@@ -440,12 +435,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         response.setEntityType("OF");
         response.setPublicCode(publicCode);
         response.setEntityId(entity.getId().toString());
-        response.setLabel(entity.getCode());          // le label = numéro OF
+        response.setLabel(entity.getCode());
         response.setStatus(entity.getStatut().name());
         response.setMobileRoute("/of/detail");
         response.setData(convertToDto(entity));
         return response;
     }
-
-
 }

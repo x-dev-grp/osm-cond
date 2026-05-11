@@ -12,13 +12,10 @@ public class ExpeditionLineCreateRequest {
 
     private UUID ofId;
     private UUID articleId;
-
     @Min(1)
     private Integer quantity;
-
     @DecimalMin(value = "0.0", inclusive = true)
     private BigDecimal volume;
-
     private String lotNumber;
     private String unit;
 }

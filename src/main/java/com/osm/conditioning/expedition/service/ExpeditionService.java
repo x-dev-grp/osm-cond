@@ -248,11 +248,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         return toDto(saved);
     }
 
-    /* ──────────────────────── STATUS TRANSITIONS ──────────────────────── */
-    /*
-     *  DRAFT  →  READY  →  VALIDATED  →  SHIPPED  →  DELIVERED  →  CLOSED
-     *    └──────────┴───────────┘ → CANCELLED
-     */
+     // DRAFT  →  READY  →  VALIDATED  →  SHIPPED  →  DELIVERED  →  CLOSED
 
     @Transactional
     public ExpeditionDto markReady(UUID expeditionId, ExpeditionActionRequest request) {

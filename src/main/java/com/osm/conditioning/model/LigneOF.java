@@ -4,6 +4,7 @@ import com.xdev.xdevbase.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.envers.Audited;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -13,6 +14,7 @@ import java.util.UUID;
 @Table(name = "ligne_of")
 @Getter
 @Setter
+@Audited
 public class LigneOF extends BaseEntity implements Serializable {
 
     @ManyToOne

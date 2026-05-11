@@ -1,8 +1,8 @@
 package com.osm.conditioning.projet.service;
 
 import com.osm.conditioning.projet.dto.ProjetDto;
+import com.osm.conditioning.projet.entity.Client;
 import com.osm.conditioning.projet.entity.Projet;
-import com.osm.conditioning.projet.entity.ProjetClient;
 import com.osm.conditioning.projet.repository.ProjetRepository;
 import com.osm.conditioning.shipping.service.ShippingInfoService;
 
@@ -32,6 +32,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
+    private final ClientService clientService;
     private final ProjetClientService projetClientService;
     private final ShippingInfoService shippingInfoService;
 
@@ -40,13 +41,13 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
-            ProjetClientService projetClientService,
-            ShippingInfoService shippingInfoService
+            ClientService clientService
+             ShippingInfoService shippingInfoService
     ) {
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
-        this.projetClientService = projetClientService;
-        this.shippingInfoService = shippingInfoService;
+        this.clientService = clientService;
+         this.shippingInfoService = shippingInfoService;
     }
 
     @Override
@@ -61,6 +62,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     @Override
     @Transactional(readOnly = true)
     public QrResolveResponse resolve(String publicCode) {
+
         if (publicCode == null || publicCode.isBlank()) {
             throw new IllegalArgumentException("Le code est obligatoire");
         }
@@ -191,7 +193,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     @Transactional
     public ProjetDto create(ProjetDto dto) {
-        ProjetClient client = projetClientService.findByIdOrThrow(dto.getClientId());
+        Client client = clientService.findClientEntityById(dto.getClientId());
 
         Projet projet = new Projet();
         projet.setCode(generateCode());
@@ -199,6 +201,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         applyBusinessFields(projet, dto);
 
         UUID tenantId = TenantContext.getCurrentTenant();
+
         if (tenantId != null) {
             projet.setTenantId(tenantId);
         }
@@ -225,53 +228,68 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     @Transactional
     public ProjetDto update(UUID id, ProjetDto dto) {
-        Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
 
-        ProjetClient client = projetClientService.findByIdOrThrow(dto.getClientId());
+        Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
+                .orElseThrow(() ->
+                        new EntityNotFoundException("Projet non trouve : " + id));
+        Client client = clientService.findClientEntityById(dto.getClientId());
 
         projet.setClient(client);
+
         applyBusinessFields(projet, dto);
 
         Projet saved = projetRepository.save(projet);
+
         return toDto(saved);
     }
 
     @Override
     @Transactional
     public ProjetDto update(ProjetDto dto) {
+
         if (dto == null || dto.getId() == null) {
-            throw new IllegalArgumentException("L'id du projet est obligatoire pour la mise a jour");
+            throw new IllegalArgumentException(
+                    "L'id du projet est obligatoire pour la mise a jour");
         }
+
         return update(dto.getId(), dto);
     }
 
     @Transactional
     public ProjetDto cancel(UUID id) {
+
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
+                .orElseThrow(() ->
+                        new EntityNotFoundException("Projet non trouve : " + id));
 
         projet.setStatut(STATUT_ANNULE);
 
         Projet saved = projetRepository.save(projet);
+
         return toDto(saved);
     }
 
     @Override
     @Transactional
     public ProjetDto delete(UUID id) {
+
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
+                .orElseThrow(() ->
+                        new EntityNotFoundException("Projet non trouve : " + id));
 
         projet.setDeleted(true);
+
         Projet saved = projetRepository.save(projet);
+
         return toDto(saved);
     }
 
     @Transactional
     public ProjetDto updateStatus(UUID id, String statut) {
+
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
+                .orElseThrow(() ->
+                        new EntityNotFoundException("Projet non trouve : " + id));
 
         if (statut == null || statut.isBlank()) {
             throw new IllegalArgumentException("Le statut est obligatoire");
@@ -280,36 +298,44 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         projet.setStatut(statut.trim().toUpperCase());
 
         Projet saved = projetRepository.save(projet);
+
         return toDto(saved);
     }
 
     @Transactional
     public ProjetDto updateStatusByCode(String code, String statut) {
+
         ProjetDto projetDto = findByUniqueCode(code);
+
         return updateStatus(projetDto.getId(), statut);
     }
 
     @Transactional(readOnly = true)
     public Projet findByIdOrThrow(UUID id) {
+
         return projetRepository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
+                .orElseThrow(() ->
+                        new EntityNotFoundException("Projet non trouve : " + id));
     }
 
     public byte[] generateQrImageFromEntity(Projet entity) {
+
         if (entity == null || entity.getId() == null) {
-            throw new IllegalArgumentException("Projet invalide pour generation QR");
+            throw new IllegalArgumentException(
+                    "Projet invalide pour generation QR");
         }
 
         if (entity.getQrHex() != null && !entity.getQrHex().isBlank()) {
             return generateQrImage(entity.getQrHex());
         }
 
-        // Correction: utiliser un type stable et explicite
         QrCodeInfo qrInfo = generateQrInfo(ENTITY_TYPE, entity.getId());
+
         return generateQrImage(qrInfo.getPublicCode());
     }
 
     private void applyBusinessFields(Projet projet, ProjetDto dto) {
+
         projet.setTypeProduit(dto.getTypeProduit());
         projet.setTypeEmballage(dto.getTypeEmballage());
         projet.setQuantiteCible(dto.getQuantiteCible());
@@ -326,13 +352,23 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             projet.setStatut(STATUT_BROUILLON);
         }
 
-        projet.setValeurTotale(calculateValeurTotale(dto.getQuantiteCible(), dto.getPrixUnitaire()));
+        projet.setValeurTotale(
+                calculateValeurTotale(
+                        dto.getQuantiteCible(),
+                        dto.getPrixUnitaire()
+                )
+        );
     }
 
-    private BigDecimal calculateValeurTotale(Double quantiteCible, BigDecimal prixUnitaire) {
+    private BigDecimal calculateValeurTotale(
+            Double quantiteCible,
+            BigDecimal prixUnitaire
+    ) {
+
         if (quantiteCible == null || prixUnitaire == null) {
             return BigDecimal.ZERO;
         }
+
         return prixUnitaire.multiply(BigDecimal.valueOf(quantiteCible));
     }
 
@@ -341,7 +377,9 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     }
 
     private ProjetDto toDto(Projet projet) {
+
         ProjetDto dto = new ProjetDto();
+
         dto.setId(projet.getId());
         dto.setCode(projet.getCode());
 
@@ -366,24 +404,38 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         dto.setSkuId(projet.getSkuId());
         dto.setBomId(projet.getBomId());
 
-        // Agrégation des données OF
-        if (projet.getOrdresFabrication() != null && !projet.getOrdresFabrication().isEmpty()) {
+        if (projet.getOrdresFabrication() != null
+                && !projet.getOrdresFabrication().isEmpty()) {
+
             dto.setNombreOF(projet.getOrdresFabrication().size());
 
-            double totalProduit = projet.getOrdresFabrication().stream()
+            double totalProduit = projet.getOrdresFabrication()
+                    .stream()
                     .filter(of -> of.getQuantiteBonne() != null)
                     .mapToDouble(of -> of.getQuantiteBonne().doubleValue())
                     .sum();
 
             dto.setQuantiteProduite(totalProduit);
 
-            if (projet.getQuantiteCible() != null && projet.getQuantiteCible() > 0) {
-                double taux = (totalProduit / projet.getQuantiteCible()) * 100.0;
-                dto.setTauxAvancement(Math.min(100.0, Math.round(taux * 100.0) / 100.0));
+            if (projet.getQuantiteCible() != null
+                    && projet.getQuantiteCible() > 0) {
+
+                double taux =
+                        (totalProduit / projet.getQuantiteCible()) * 100.0;
+
+                dto.setTauxAvancement(
+                        Math.min(
+                                100.0,
+                                Math.round(taux * 100.0) / 100.0
+                        )
+                );
+
             } else {
                 dto.setTauxAvancement(0.0);
             }
+
         } else {
+
             dto.setNombreOF(0);
             dto.setQuantiteProduite(0.0);
             dto.setTauxAvancement(0.0);

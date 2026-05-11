@@ -7,7 +7,7 @@ import com.osm.conditioning.client.clientProductionDelivery;
 import com.osm.conditioning.client.clientProductionOilTransaction;
 import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.client.clientSecurityCompanyProfile;
-import com.osm.conditioning.dto.SKUDto;
+import com.osm.conditioning.dto.ProductDto;
 import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.LabelSource;
 import com.osm.conditioning.repository.LabelContentRepository;
@@ -96,7 +96,7 @@ public class LabelContentService {
         }
 
         StorageUnitDto storageUnit = response.getData();
-        SKUDto packaging = clientInventaire.getSkuById(request.getPackagingId());
+        ProductDto packaging = clientInventaire.getProductById(request.getPackagingId());
 
         UUID tenantId = TenantContext.getCurrentTenant();
         if (tenantId == null) {
@@ -256,9 +256,9 @@ public class LabelContentService {
         return labelContentRepository.save(labelContent);
     }
 
-    private SKUDto loadPackaging(UUID packagingId) {
+    private ProductDto loadPackaging(UUID packagingId) {
         try {
-            return clientInventaire.getSkuById(packagingId);
+            return clientInventaire.getProductById(packagingId);
         } catch (Exception ignored) {
             throw new EntityNotFoundException("Packaging introuvable pour l'id: " + packagingId);
         }
@@ -267,7 +267,7 @@ public class LabelContentService {
     private void prepareLabelContent(
             LabelContent labelContent,
             StorageUnitDto storageUnit,
-            SKUDto packaging,
+            ProductDto packaging,
             CompanyProfileDto companyProfile) {
         labelContent.setLotNumber(storageUnit.getLotNumber());
 
@@ -299,7 +299,7 @@ public class LabelContentService {
     private void saveSourceProofs(
             LabelContent labelContent,
             StorageUnitDto storageUnit,
-            SKUDto packaging,
+            ProductDto packaging,
             UserContext currentUser,
             CompanyProfileDto companyProfile
     ) {
@@ -458,7 +458,7 @@ public class LabelContentService {
         return String.format(Locale.ROOT, "%.0f ml", volume);
     }
 
-    private String calculateQuantity(SKUDto packaging, LabelCategory category) {
+    private String calculateQuantity(ProductDto packaging, LabelCategory category) {
         if (packaging == null) {
             return null;
         }

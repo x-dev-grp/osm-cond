@@ -1,6 +1,5 @@
 package com.osm.conditioning.client;
 
-
 import com.osm.conditioning.dto.*;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,8 +13,8 @@ import java.util.UUID;
 @FeignClient(name = "inventory-service", url = "${inventory.service.url}", configuration = com.xdev.xdevsecurity.config.FeignConfiguration.class)
 public interface clientInventaire {
 
-    @GetMapping("/api/inventaire/skus/{id}")
-    SKUDto getSkuById(@PathVariable("id") UUID id);
+    @GetMapping("/api/inventaire/products/{id}")
+    ProductDto getProductById(@PathVariable("id") UUID id);
 
     @GetMapping("/api/inventaire/articles/{id}")
     ArticleSecDto getArticleById(@PathVariable("id") UUID id);

@@ -15,6 +15,10 @@ public interface OfAnalyticsProjection {
     BigDecimal getQuantiteCible();
     BigDecimal getQuantiteBonne();
     LocalDateTime getDateDebutPrevue();
-    UUID getSkuId();
+    UUID getProductId();
     UUID getBomId();
+
+    default UUID getSkuId() {
+        return getProductId();
+    }
 }

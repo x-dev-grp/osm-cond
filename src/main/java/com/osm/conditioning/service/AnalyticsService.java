@@ -228,7 +228,7 @@ public class AnalyticsService {
         OfYieldDto dto = new OfYieldDto();
         dto.setOfCode(of.getCode());
         dto.setStatut(of.getStatut() != null ? of.getStatut().name() : "INCONNU");
-        dto.setSkuId(of.getSkuId());
+        dto.setSkuId(of.getProductId());
         dto.setQuantiteCible(of.getQuantiteCible());
         dto.setQuantiteBonne(of.getQuantiteBonne() != null ? of.getQuantiteBonne() : BigDecimal.ZERO);
         if (dto.getQuantiteCible() != null && dto.getQuantiteCible().compareTo(BigDecimal.ZERO) > 0) {
@@ -245,7 +245,7 @@ public class AnalyticsService {
         OfYieldDto dto = new OfYieldDto();
         dto.setOfCode(of.getCode());
         dto.setStatut(of.getStatut() != null ? of.getStatut().name() : "INCONNU");
-        dto.setSkuId(of.getSkuId());
+        dto.setSkuId(of.getProductId());
         dto.setQuantiteCible(of.getQuantiteCible());
         dto.setQuantiteBonne(of.getQuantiteBonne() != null ? of.getQuantiteBonne() : BigDecimal.ZERO);
         if (dto.getQuantiteCible() != null && dto.getQuantiteCible().compareTo(BigDecimal.ZERO) > 0) {

@@ -194,14 +194,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     @Transactional
     public ProjetDto create(ProjetDto dto) {
-        if (dto.getClient() == null || dto.getClient().getId() == null) {
-            throw new IllegalArgumentException("Client is required");
-        }
-
-        Client client = clientRepository.findById(dto.getClient().getId())
-                .orElseThrow(() -> new EntityNotFoundException(
-                        "Client not found with id: " + dto.getClient().getId()
-                ));
+        Client client = resolveClient(dto);
 
         Projet projet = new Projet();
         projet.setCode(generateCode());
@@ -241,7 +234,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() ->
                         new EntityNotFoundException("Projet non trouve : " + id));
-        Client client = clientService.findClientEntityById(dto.getId());
+        Client client = resolveClient(dto);
 
         projet.setClient(client);
 
@@ -394,6 +387,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
         if (projet.getClient() != null) {
             dto.setClient(modelMapper.map(projet.getClient(), ClientDto.class));
+            dto.setClientId(projet.getClient().getId());
         }
 
         dto.setTypeProduit(projet.getTypeProduit());
@@ -449,5 +443,31 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         return dto;
+    }
+
+    private Client resolveClient(ProjetDto dto) {
+        UUID clientId = resolveClientId(dto);
+
+        return clientRepository.findById(clientId)
+                .orElseThrow(() -> new EntityNotFoundException(
+                        "Client not found with id: " + clientId
+                ));
+    }
+
+    private UUID resolveClientId(ProjetDto dto) {
+        if (dto == null) {
+            throw new IllegalArgumentException("Client is required");
+        }
+
+        UUID clientId = dto.getClientId();
+        if (clientId == null && dto.getClient() != null) {
+            clientId = dto.getClient().getId();
+        }
+
+        if (clientId == null) {
+            throw new IllegalArgumentException("Client is required");
+        }
+
+        return clientId;
     }
 }

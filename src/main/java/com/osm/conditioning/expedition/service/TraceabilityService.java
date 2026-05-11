@@ -3,7 +3,7 @@ package com.osm.conditioning.expedition.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.client.clientProductionStorage;
-import com.osm.conditioning.dto.SKUDto;
+import com.osm.conditioning.dto.ProductDto;
 import com.osm.conditioning.expedition.dto.GenealogyDto;
 import com.osm.conditioning.expedition.model.Expedition;
 import com.osm.conditioning.expedition.model.ExpeditionArticle;
@@ -45,7 +45,7 @@ public class TraceabilityService {
             return buildTraceabilityMap(ofs, null);
         } catch (Exception e) {
             log.error("Failed to get live project traceability", e);
-            throw new IllegalStateException("Impossible de charger la traçabilité en direct du projet", e);
+            throw new IllegalStateException("Impossible de charger la traÃ§abilitÃ© en direct du projet", e);
         }
     }
 
@@ -76,14 +76,14 @@ public class TraceabilityService {
             UUID ofId = of.getId();
             Map<String, Object> ofSnapshot = new LinkedHashMap<>();
             ofSnapshot.put("code", valueOrEmpty(of.getCode()));
-            ofSnapshot.put("skuId", of.getSkuId() != null ? of.getSkuId().toString() : "");
+            ofSnapshot.put("productId", of.getProductId() != null ? of.getProductId().toString() : "");
             
-            if (of.getSkuId() != null) {
+            if (of.getProductId() != null) {
                 try {
-                    SKUDto sku = inventaireClient.getSkuById(of.getSkuId());
-                    if (sku != null) ofSnapshot.put("articleName", sku.getCode());
+                    ProductDto product = inventaireClient.getProductById(of.getProductId());
+                    if (product != null) ofSnapshot.put("articleName", product.getName());
                 } catch (Exception e) {
-                    log.warn("Could not fetch article name for SKU {}", of.getSkuId());
+                    log.warn("Could not fetch article name for Product {}", of.getProductId());
                 }
             }
 

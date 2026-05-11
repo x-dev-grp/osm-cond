@@ -44,7 +44,7 @@ public class OrdreFabrication extends BaseEntity implements Serializable {
     private BigDecimal quantiteNC = BigDecimal.ZERO;
     private Long dureeReelle;
     @Column(name = "sku_id", nullable = false)
-    private UUID skuId;
+    private UUID productId;
     @Column(name = "bom_id")
     private UUID bomId;
     @Column(name = "ligne_id")
@@ -65,4 +65,12 @@ public class OrdreFabrication extends BaseEntity implements Serializable {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "projet_id")
     private Projet projet;
+
+    public UUID getSkuId() {
+        return productId;
+    }
+
+    public void setSkuId(UUID skuId) {
+        this.productId = skuId;
+    }
 }

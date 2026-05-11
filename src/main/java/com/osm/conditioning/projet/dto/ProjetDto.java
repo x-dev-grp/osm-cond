@@ -1,6 +1,8 @@
 package com.osm.conditioning.projet.dto;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.projet.entity.Projet;
 import com.osm.conditioning.projet.enums.TypeEmballage;
@@ -13,10 +15,6 @@ import lombok.EqualsAndHashCode;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -26,6 +24,9 @@ public class ProjetDto extends BaseDto<Projet> {
     private String code;
 
     private ClientDto client;
+
+    @JsonAlias({"client_id", "projetClientId", "projet_client_id"})
+    private UUID clientId;
 
     private TypeProduit typeProduit;
 
@@ -54,7 +55,42 @@ public class ProjetDto extends BaseDto<Projet> {
     private Double quantiteProduite;
     private Integer nombreOF;
 
-    private UUID skuId;
-    private String skuCode;
+    @JsonAlias("skuId")
+    private UUID productId;
+    private String productName;
     private UUID bomId;
+
+    @JsonProperty("skuId")
+    public UUID getSkuId() {
+        return productId;
+    }
+
+    public void setSkuId(UUID skuId) {
+        this.productId = skuId;
+    }
+
+    @JsonProperty("skuCode")
+    public String getSkuCode() {
+        return productName;
+    }
+
+    public void setSkuCode(String skuCode) {
+        this.productName = skuCode;
+    }
+
+    @JsonProperty("clientId")
+    public UUID getClientId() {
+        if (clientId != null) {
+            return clientId;
+        }
+
+        return client != null ? client.getId() : null;
+    }
+
+    public void setClient(ClientDto client) {
+        this.client = client;
+        if (client != null && client.getId() != null) {
+            this.clientId = client.getId();
+        }
+    }
 }

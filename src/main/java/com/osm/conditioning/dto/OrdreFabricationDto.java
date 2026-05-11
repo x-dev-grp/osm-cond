@@ -1,8 +1,8 @@
 package com.osm.conditioning.dto;
 
 
-
-
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.osm.conditioning.Enum.QualityStatus;
 import com.osm.conditioning.Enum.StatutOF;
 import com.osm.conditioning.model.OrdreFabrication;
@@ -31,8 +31,9 @@ public class OrdreFabricationDto extends BaseDto<OrdreFabrication> {
     private BigDecimal quantiteBonne;
     private BigDecimal quantiteNC;
     private Long dureeReelle;
-    private UUID skuId;
-    private String skuCode;
+    @JsonAlias("skuId")
+    private UUID productId;
+    private String productName;
     private UUID ligneId;
     private String ligneNom;
     private UUID lotVracId;
@@ -45,4 +46,22 @@ public class OrdreFabricationDto extends BaseDto<OrdreFabrication> {
     private QualityStatus qualityStatus;
     private UUID projectId;
     private String projectCode;
+
+    @JsonProperty("skuId")
+    public UUID getSkuId() {
+        return productId;
+    }
+
+    public void setSkuId(UUID skuId) {
+        this.productId = skuId;
+    }
+
+    @JsonProperty("skuCode")
+    public String getSkuCode() {
+        return productName;
+    }
+
+    public void setSkuCode(String skuCode) {
+        this.productName = skuCode;
+    }
 }

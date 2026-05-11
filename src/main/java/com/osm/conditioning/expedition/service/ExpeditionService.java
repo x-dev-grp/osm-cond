@@ -8,7 +8,7 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.dto.ArticleSecDto;
-import com.osm.conditioning.dto.SKUDto;
+import com.osm.conditioning.dto.ProductDto;
 import com.osm.conditioning.dto.StockSecDto;
 import com.osm.conditioning.expedition.dto.*;
 import com.osm.conditioning.expedition.enums.ExpeditionStatus;
@@ -537,11 +537,11 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
 
         if (article != null) {
             line.setArticleNameSnapshot(article.getNom());
-        } else if (of != null && of.getSkuId() != null) {
+        } else if (of != null && of.getProductId() != null) {
             try {
-                SKUDto sku = inventaireClient.getSkuById(of.getSkuId());
-                if (sku != null && sku.getCode() != null) {
-                    line.setArticleNameSnapshot(sku.getCode());
+                ProductDto product = inventaireClient.getProductById(of.getProductId());
+                if (product != null && product.getName() != null) {
+                    line.setArticleNameSnapshot(product.getName());
                 }
             } catch (Exception ignored) {
                 if (line.getArticleNameSnapshot() == null) {
@@ -581,7 +581,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         expedition.setPlannedShipDate(plannedShipDate);
         expedition.setNotes(normalizeNullable(notes));
 
-        // Transport fields — always updatable while editable
+        // Transport fields â€” always updatable while editable
         if (carrierName != null) expedition.setCarrierName(normalizeNullable(carrierName));
         if (driverName != null) expedition.setDriverName(normalizeNullable(driverName));
         if (truckNumber != null) expedition.setTruckNumber(normalizeNullable(truckNumber));

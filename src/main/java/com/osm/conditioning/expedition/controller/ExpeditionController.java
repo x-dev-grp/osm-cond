@@ -64,6 +64,10 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new ApiSingleResponse<>(true, "Expedition created successfully", created));
     }
+    @GetMapping("/{id}")
+    public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
+        return ResponseEntity.ok(expeditionService.getById(id));
+    }
 
 
     @GetMapping("/project/{projectId}")

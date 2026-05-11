@@ -7,6 +7,8 @@ import com.osm.conditioning.dto.*;
 import com.osm.conditioning.model.LigneOF;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
+import com.xdev.communicator.models.shared.ApiResponse;
+import com.xdev.communicator.models.shared.StorageUnitDto;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.Component.QrConfig;
@@ -152,8 +154,8 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         // Validation de la cuve d'huile (lot vrac)
         if (dto.getLotVracId() != null) {
             try {
-                com.xdev.communicator.models.shared.ApiResponse<com.xdev.communicator.models.shared.StorageUnitDto> resp = 
-                    productionStorageClient.getStorageUnit(dto.getLotVracId());
+               ApiResponse<StorageUnitDto> resp =
+                        productionStorageClient.getStorageUnit(dto.getLotVracId());
                 if (resp == null || !resp.isSuccess() || resp.getData() == null) {
                     throw new RuntimeException("Cuve d'huile introuvable (ID: " + dto.getLotVracId() + ")");
                 }

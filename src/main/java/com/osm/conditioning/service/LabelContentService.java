@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.client.clientProductionDelivery;
+import com.osm.conditioning.client.clientProductionFiltration;
 import com.osm.conditioning.client.clientProductionOilTransaction;
 import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.client.clientSecurityCompanyProfile;
@@ -16,6 +17,7 @@ import com.xdev.communicator.models.enums.*;
 import com.xdev.communicator.models.shared.*;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
+import com.xdev.xdevbase.utils.OSMLogger;
 import com.xdev.xdevbase.utils.SecurityUtils;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,7 @@ public class LabelContentService {
     private final ObjectMapper objectMapper;
     private final CodeGenerator codeGenerator;
     private final CertificationRepository certificationRepository;
+    private final clientProductionFiltration clientProductionFiltration;
 
     public LabelContentService(
             LabelContentRepository labelContentRepository,
@@ -66,7 +69,8 @@ public class LabelContentService {
             clientSecurityCompanyProfile clientSecurityCompanyProfile,
             ObjectMapper objectMapper,
             CodeGenerator codeGenerator,
-            CertificationRepository certificationRepository) {
+            CertificationRepository certificationRepository,
+            clientProductionFiltration clientProductionFiltration) {
         this.labelContentRepository = labelContentRepository;
         this.clientInventaire = clientInventaire;
         this.clientProductionStorage = clientProductionStorage;
@@ -75,6 +79,7 @@ public class LabelContentService {
         this.objectMapper = objectMapper;
         this.codeGenerator = codeGenerator;
         this.certificationRepository = certificationRepository;
+        this.clientProductionFiltration = clientProductionFiltration;
     }
 
     @Transactional(readOnly = true)
@@ -112,6 +117,7 @@ public class LabelContentService {
         labelContent.setLanguage(Optional.ofNullable(request.getLanguage()).orElse(LabelLanguage.FR));
         labelContent.setPackagingDate(Optional.ofNullable(request.getPackagingDate()).orElse(LocalDate.now()));
         labelContent.setLabelCategory(Optional.ofNullable(request.getLabelCategory()).orElse(LabelCategory.UNIT));
+        labelContent.setFiltrationOperationId(request.getFiltrationOperationId());
         labelContent.setStatus(LabelContentStatus.DRAFT);
 
         prepareLabelContent(labelContent, storageUnit, packaging, companyProfile);
@@ -122,7 +128,7 @@ public class LabelContentService {
                 request.getVariety()
         );
 
-        saveSourceProofs(labelContent, storageUnit, packaging, currentUser, companyProfile);
+        saveSourceProofs(labelContent, storageUnit, packaging, currentUser, companyProfile, request.getFiltrationOperationId());
 
         LabelContent saved = ensureQrCode(labelContentRepository.save(labelContent));
         return toDto(saved, validateLabel(saved));
@@ -199,22 +205,6 @@ public class LabelContentService {
         }
 
         return toExportDto(labelContent);
-    }
-
-    @Transactional
-    public LabelContentDto validate(UUID id) {
-        LabelContent labelContent = findLabelOrThrow(id);
-
-        defaultLegalDenomination(labelContent);
-
-        List<LabelValidationIssueDto> issues = validateLabel(labelContent);
-
-        if (labelContent.getStatus() != LabelContentStatus.FINALIZED) {
-            labelContent.setStatus(issues.isEmpty() ? LabelContentStatus.VALIDATED : LabelContentStatus.DRAFT);
-        }
-
-        LabelContent saved = labelContentRepository.save(labelContent);
-        return toDto(saved, issues);
     }
 
     @Transactional
@@ -301,7 +291,8 @@ public class LabelContentService {
             StorageUnitDto storageUnit,
             ProductDto packaging,
             UserContext currentUser,
-            CompanyProfileDto companyProfile
+            CompanyProfileDto companyProfile,
+            UUID filtrationOperationId
     ) {
         labelContent.getSourceSnapshots().clear();
         addSnapshot(labelContent, LabelSourceType.FILTERED_LOT, storageUnit.getId(), storageUnit.getLotNumber(), storageUnit);
@@ -311,6 +302,17 @@ public class LabelContentService {
             addSnapshot(labelContent, LabelSourceType.COMPANY_PROFILE, companyProfile.getId(), companyProfile.getLegalName(), companyProfile);
         }
 
+        if (filtrationOperationId != null) {
+            try {
+                ApiResponse<Object> opResponse = clientProductionFiltration.getFiltration(filtrationOperationId);
+                if (opResponse != null && opResponse.getData() != null) {
+                    addSnapshot(labelContent, LabelSourceType.FILTRATION_OPERATION, filtrationOperationId, "OP-" + filtrationOperationId.toString().substring(0, 8), opResponse.getData());
+                }
+            } catch (Exception e) {
+                // Non-blocking for now
+                OSMLogger.logException(this.getClass(), "saveSourceProofs - filtration", e);
+            }
+        }
     }
 
     private void addSnapshot(
@@ -905,6 +907,7 @@ public class LabelContentService {
         dto.setLotId(labelContent.getLotId());
         dto.setPackagingId(labelContent.getPackagingId());
         dto.setOperatorId(labelContent.getOperatorId());
+        dto.setFiltrationOperationId(labelContent.getFiltrationOperationId());
         dto.setStatus(labelContent.getStatus());
         dto.setLanguage(labelContent.getLanguage());
         dto.setPackagingDate(labelContent.getPackagingDate());

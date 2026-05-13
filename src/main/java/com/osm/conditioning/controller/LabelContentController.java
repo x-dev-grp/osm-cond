@@ -143,30 +143,6 @@ public class LabelContentController {
         }
     }
 
-    @PostMapping("/{id}/validate")
-    public ResponseEntity<ApiResponse<LabelContentDto>> validate(@PathVariable UUID id) {
-        long startTime = System.currentTimeMillis();
-        OSMLogger.logMethodEntry(this.getClass(), "validate", id);
-
-        try {
-            LabelContentDto result = labelContentService.validate(id);
-
-            OSMLogger.logMethodExit(this.getClass(), "validate", result);
-            OSMLogger.logPerformance(this.getClass(), "validate", startTime, System.currentTimeMillis());
-
-            return success(HttpStatus.OK, "Contenu d'etiquette valide avec succes", result);
-        } catch (IllegalStateException e) {
-            OSMLogger.logException(this.getClass(), "validate", e);
-            return failure(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (EntityNotFoundException e) {
-            OSMLogger.logException(this.getClass(), "validate", e);
-            return failure(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (Exception e) {
-            OSMLogger.logException(this.getClass(), "validate", e);
-            return failure(HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne lors de la validation de l'etiquette");
-        }
-    }
-
     @PostMapping("/{id}/finalize")
     public ResponseEntity<ApiResponse<LabelContentDto>> finalizeLabel(@PathVariable UUID id) {
         long startTime = System.currentTimeMillis();

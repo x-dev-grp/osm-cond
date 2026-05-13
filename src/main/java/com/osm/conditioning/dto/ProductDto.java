@@ -2,6 +2,7 @@ package com.osm.conditioning.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.xdev.communicator.models.common.dtos.BaseDto;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
@@ -11,7 +12,7 @@ import java.util.UUID;
 @Data
 @Getter
 @Setter
-public class ProductDto {
+public class ProductDto extends BaseDto {
     private UUID id;
     private String name;
     @JsonAlias("skuCode")

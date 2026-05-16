@@ -16,12 +16,13 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Entity
 @Getter
 @Audited
 @Setter
-public class Projet extends BaseEntity implements Serializable {
+public class Projet extends BaseEntity {
 
     @Column(unique = true, length = 100)
     private String code;
@@ -54,17 +55,14 @@ public class Projet extends BaseEntity implements Serializable {
 
     private String statut;
 
-    @Column(name = "sku_id")
-    private UUID productId;
+    @OneToMany(mappedBy = "projet", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ProjetProduit> produits = new ArrayList<>();
 
-    @Column(name = "bom_id")
-    private UUID bomId;
+    @OneToMany(mappedBy = "projet", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ProjetReservation> reservations = new ArrayList<>();
 
-    public UUID getSkuId() {
-        return productId;
-    }
-
-    public void setSkuId(UUID skuId) {
-        this.productId = skuId;
-    }
+    @ElementCollection
+    @CollectionTable(name = "projet_lignes_conditionnement", joinColumns = @JoinColumn(name = "projet_id"))
+    @Column(name = "ligne_id", nullable = false)
+    private List<UUID> ligneIds = new ArrayList<>();
 }

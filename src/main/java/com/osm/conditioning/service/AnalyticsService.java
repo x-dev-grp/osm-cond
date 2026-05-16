@@ -180,12 +180,12 @@ public class AnalyticsService {
                 BigDecimal quantiteBonne = of.getQuantiteBonne() != null ? of.getQuantiteBonne() : BigDecimal.ZERO;
 
                 for (BomLineDto line : bom.getLines()) {
-                    if (line.getQuantity() == null) continue;
+                    // quantity is a primitive double, it cannot be null
 
                     // Consommation théorique (planifiée) = quantité BOM par unité × quantité cible OF
-                    BigDecimal planned = line.getQuantity().multiply(quantiteCible).setScale(3, RoundingMode.HALF_UP);
+                    BigDecimal planned = BigDecimal.valueOf(line.getQuantity()).multiply(quantiteCible).setScale(3, RoundingMode.HALF_UP);
                     // Consommation estimée réelle = quantité BOM par unité × quantité bonne produite
-                    BigDecimal actual = line.getQuantity().multiply(quantiteBonne).setScale(3, RoundingMode.HALF_UP);
+                    BigDecimal actual = BigDecimal.valueOf(line.getQuantity()).multiply(quantiteBonne).setScale(3, RoundingMode.HALF_UP);
                     BigDecimal gap = planned.subtract(actual);
                     BigDecimal gapPct = planned.compareTo(BigDecimal.ZERO) > 0
                             ? gap.multiply(BigDecimal.valueOf(100)).divide(planned, 2, RoundingMode.HALF_UP)

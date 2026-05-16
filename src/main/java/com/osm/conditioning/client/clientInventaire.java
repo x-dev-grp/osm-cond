@@ -31,4 +31,16 @@ public interface clientInventaire {
     @PutMapping("/api/inventaire/stocks/{articleId}/sortie")
     StockSecDto sortieStock(@PathVariable("articleId") UUID articleId,
                             @RequestBody Map<String, Object> payload);
+
+    @PutMapping("/api/inventaire/stocks/{articleId}/reserver")
+    StockSecDto reserverStock(@PathVariable("articleId") UUID articleId,
+                              @RequestBody Map<String, Object> payload);
+
+    @PutMapping("/api/inventaire/stocks/{articleId}/annuler-reservation")
+    StockSecDto annulerReservation(@PathVariable("articleId") UUID articleId,
+                                   @RequestBody Map<String, Object> payload);
+
+    @PutMapping("/api/inventaire/stocks/{articleId}/consommer-reservation")
+    StockSecDto consommerReservation(@PathVariable("articleId") UUID articleId,
+                                      @RequestBody Map<String, Object> payload);
 }

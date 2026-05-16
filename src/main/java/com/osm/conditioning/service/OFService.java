@@ -111,12 +111,17 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
 
         // Héritage des données du projet si non spécifiées dans le DTO
-        if (projet != null) {
-            if (dto.getProductId() == null) {
-                dto.setProductId(projet.getProductId());
-            }
-            if (dto.getBomId() == null) {
-                dto.setBomId(projet.getBomId());
+        if (projet != null && dto.getProductId() == null) {
+            if (projet.getProduits() != null && projet.getProduits().size() == 1) {
+                // Si le projet n'a qu'un seul produit, on l'hérite automatiquement
+                com.osm.conditioning.projet.entity.ProjetProduit seulProduit = projet.getProduits().get(0);
+                dto.setProductId(seulProduit.getProductId());
+                if (dto.getBomId() == null) {
+                    dto.setBomId(seulProduit.getBomId());
+                }
+            } else if (projet.getProduits() != null && projet.getProduits().size() > 1) {
+                // Si le projet a plusieurs produits, l'utilisateur doit en choisir un
+                throw new RuntimeException("Ce projet contient plusieurs produits. Veuillez spécifier le SKU pour cet OF.");
             }
         }
 
@@ -180,7 +185,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             LigneOF ligneOF = new LigneOF();
             ligneOF.setOf(of);
             ligneOF.setArticleId(lineBOMDto.getArticleId());
-            BigDecimal qteTheorique = lineBOMDto.getQuantity().multiply(quantiteCible);
+            BigDecimal qteTheorique = BigDecimal.valueOf(lineBOMDto.getQuantity()).multiply(quantiteCible);
             ligneOF.setQuantiteTheorique(qteTheorique);
             of.getLignes().add(ligneOF);
         }
@@ -317,7 +322,12 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                     Map<String, Object> payload = new HashMap<>();
                     payload.put("quantite", quantiteConsommee.intValue());
                     payload.put("motif", "Consommation OF " + of.getCode());
-                    clientInventaire.sortieStock(ligne.getArticleId(), payload);
+                    
+                    if (of.getProjet() != null) {
+                        clientInventaire.consommerReservation(ligne.getArticleId(), payload);
+                    } else {
+                        clientInventaire.sortieStock(ligne.getArticleId(), payload);
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException("Erreur lors de la sortie de stock pour l'article " + ligne.getArticleId() + " : " + e.getMessage(), e);
                 }

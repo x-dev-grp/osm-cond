@@ -15,6 +15,7 @@ import lombok.EqualsAndHashCode;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -25,7 +26,7 @@ public class ProjetDto extends BaseDto<Projet> {
 
     private ClientDto client;
 
-    @JsonAlias({"client_id", "projetClientId", "client_id"})
+    @JsonAlias({"client_id", "projetClientId"})
     private UUID clientId;
 
     private TypeProduit typeProduit;
@@ -45,6 +46,7 @@ public class ProjetDto extends BaseDto<Projet> {
     private String conditionsLivraison;
 
     private String statut;
+    
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdDate;
 
@@ -55,28 +57,9 @@ public class ProjetDto extends BaseDto<Projet> {
     private Double quantiteProduite;
     private Integer nombreOF;
 
-    @JsonAlias("skuId")
-    private UUID productId;
-    private String productName;
-    private UUID bomId;
-
-    @JsonProperty("skuId")
-    public UUID getSkuId() {
-        return productId;
-    }
-
-    public void setSkuId(UUID skuId) {
-        this.productId = skuId;
-    }
-
-    @JsonProperty("skuCode")
-    public String getSkuCode() {
-        return productName;
-    }
-
-    public void setSkuCode(String skuCode) {
-        this.productName = skuCode;
-    }
+    private List<ProjetProduitDto> produits;
+    private List<ProjetReservationDto> reservations;
+    private List<UUID> ligneIds;
 
     @JsonProperty("clientId")
     public UUID getClientId() {

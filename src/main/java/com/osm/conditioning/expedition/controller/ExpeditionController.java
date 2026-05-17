@@ -36,7 +36,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
 
     @GetMapping
     public ResponseEntity<List<ExpeditionDto>> getAll() {
-        return ResponseEntity.ok(expeditionService.findAll());
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.findAll()));
     }
 
     @Override
@@ -62,14 +62,14 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         
         ExpeditionDto created = expeditionService.create(request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new ApiSingleResponse<>(true, "Expedition created successfully", created));
+                .body(new ApiSingleResponse<>(true, "Expedition created successfully", attachPermittedActions(created)));
     }
 
 
 
     @GetMapping("/project/{projectId}")
     public ResponseEntity<List<ExpeditionDto>> getByProject(@PathVariable UUID projectId) {
-        return ResponseEntity.ok(expeditionService.getByProject(projectId));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.getByProject(projectId)));
     }
 
     @GetMapping("/project/{projectId}/traceability")
@@ -80,7 +80,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
 
     @GetMapping("/{id}")
     public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
-        return ResponseEntity.ok(expeditionService.getById(id));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.getById(id)));
     }
 
     @PutMapping("/{id}")
@@ -96,7 +96,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         request.setIncoterm(dto.getIncoterm());
         
         ExpeditionDto updated = expeditionService.update(id, request);
-        return ResponseEntity.ok(new ApiSingleResponse<>(true, "Expedition updated successfully", updated));
+        return ResponseEntity.ok(new ApiSingleResponse<>(true, "Expedition updated successfully", attachPermittedActions(updated)));
     }
 
     @PostMapping("/{id}/lines")
@@ -105,7 +105,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @Valid @RequestBody ExpeditionLineCreateRequest request
     ) {
         ExpeditionDto dto = expeditionService.addLine(id, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(attachPermittedActions(dto));
     }
 
     @DeleteMapping("/{id}/lines/{lineId}")
@@ -113,7 +113,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @PathVariable UUID lineId
     ) {
-        return ResponseEntity.ok(expeditionService.removeLine(id, lineId));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.removeLine(id, lineId)));
     }
 
     @PostMapping("/{id}/ready")
@@ -121,7 +121,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(expeditionService.markReady(id, request));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.markReady(id, request)));
     }
 
     @PostMapping("/{id}/validate")
@@ -129,7 +129,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(expeditionService.validate(id, request));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.validate(id, request)));
     }
 
     @PostMapping("/{id}/ship")
@@ -137,7 +137,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(expeditionService.ship(id, request));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.ship(id, request)));
     }
 
     @PostMapping("/{id}/deliver")
@@ -145,7 +145,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(expeditionService.deliver(id, request));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.deliver(id, request)));
     }
 
     @PostMapping("/{id}/close")
@@ -153,7 +153,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(expeditionService.close(id, request));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.close(id, request)));
     }
 
     @PostMapping("/{id}/cancel")
@@ -161,7 +161,7 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(expeditionService.cancel(id, request));
+        return ResponseEntity.ok(attachPermittedActions(expeditionService.cancel(id, request)));
     }
 
     @GetMapping("/{id}/qr-image")

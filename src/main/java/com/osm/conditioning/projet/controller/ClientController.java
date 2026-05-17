@@ -45,7 +45,7 @@ public class ClientController extends BaseControllerImpl<Client, ClientDto, Clie
         try {
             List<ClientDto> clients = clientService.getAllClients();
             log.debug("Successfully fetched {} clients", clients.size());
-            return ResponseEntity.ok(new ApiResponse<>(true, "Clients retrieved successfully", clients));
+            return ResponseEntity.ok(new ApiResponse<>(true, "Clients retrieved successfully", attachPermittedActions(clients)));
         } catch (Exception e) {
             log.error("Error fetching all clients: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -63,7 +63,7 @@ public class ClientController extends BaseControllerImpl<Client, ClientDto, Clie
         try {
             ClientDto client = clientService.getClientById(id);
             log.debug("Successfully fetched client with id: {}", id);
-            return ResponseEntity.ok(new ApiResponse<>(true, "Client retrieved successfully", Arrays.asList(client)));
+            return ResponseEntity.ok(new ApiResponse<>(true, "Client retrieved successfully", Arrays.asList(attachPermittedActions(client))));
         } catch (NotFoundException e) {
             log.warn("Client not found with id: {}", id);
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -85,7 +85,7 @@ public class ClientController extends BaseControllerImpl<Client, ClientDto, Clie
         try {
              ClientDto created = clientService.createClient(clientDto);
             log.info("Successfully created client with id: {}", created.getId());
-            return new ResponseEntity<>(new ApiResponse<>(true, "Client created successfully", Arrays.asList(created)),
+            return new ResponseEntity<>(new ApiResponse<>(true, "Client created successfully", Arrays.asList(attachPermittedActions(created))),
                     HttpStatus.CREATED);
         } catch (ValidationException | BadRequestException e) {
             log.warn("Validation error creating client: {}", e.getMessage());
@@ -118,7 +118,7 @@ public class ClientController extends BaseControllerImpl<Client, ClientDto, Clie
         try {
              ClientDto updated = clientService.updateClient(id, clientDto);
             log.info("Successfully updated client with id: {}", id);
-            return ResponseEntity.ok(new ApiResponse<>(true, "Client updated successfully", Arrays.asList(updated)));
+            return ResponseEntity.ok(new ApiResponse<>(true, "Client updated successfully", Arrays.asList(attachPermittedActions(updated))));
         } catch (NotFoundException e) {
             log.warn("Client not found for update with id: {}", id);
             return ResponseEntity.status(HttpStatus.NOT_FOUND)

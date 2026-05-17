@@ -37,24 +37,24 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
     @GetMapping("/{id}")
     public ResponseEntity<ProjetDto> getProjetById(@PathVariable UUID id) {
         ProjetDto projet = projetService.findById(id);
-        return ResponseEntity.ok(projet);
+        return ResponseEntity.ok(attachPermittedActions(projet));
     }
 
     @GetMapping("/all")
     public ResponseEntity<List<ProjetDto>> getAllProjets() {
-        return ResponseEntity.ok(projetService.findAll());
+        return ResponseEntity.ok(attachPermittedActions(projetService.findAll()));
     }
 
     @PostMapping("/create")
     public ResponseEntity<ProjetDto> createProjetManual(@Valid @RequestBody ProjetDto dto) {
         ProjetDto created = projetService.create(dto);
-        return new ResponseEntity<>(created, HttpStatus.CREATED);
+        return new ResponseEntity<>(attachPermittedActions(created), HttpStatus.CREATED);
     }
 
     @GetMapping("/code/{code}")
     public ResponseEntity<ProjetDto> getProjetByCode(@PathVariable String code) {
         ProjetDto projet = projetService.findByCode(code);
-        return ResponseEntity.ok(projet);
+        return ResponseEntity.ok(attachPermittedActions(projet));
     }
 
     @GetMapping("/unique/{code}")
@@ -62,7 +62,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto projet = projetService.findByUniqueCode(code);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Projet trouvé", projet)
+                    new ApiSingleResponse<>(true, "Projet trouvé", attachPermittedActions(projet))
             );
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -78,7 +78,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             List<ProjetDto> projets = projetService.findAll();
             return ResponseEntity.ok(
-                    new ApiResponse<>(true, "Projets récupérés avec succès", projets)
+                    new ApiResponse<>(true, "Projets récupérés avec succès", attachPermittedActions(projets))
             );
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -91,7 +91,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto projet = projetService.findById(id);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Projet récupéré avec succès", projet)
+                    new ApiSingleResponse<>(true, "Projet récupéré avec succès", attachPermittedActions(projet))
             );
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -109,7 +109,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto created = projetService.create(dto);
             return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(new ApiSingleResponse<>(true, "Projet créé avec succès", created));
+                    .body(new ApiSingleResponse<>(true, "Projet créé avec succès", attachPermittedActions(created)));
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest()
                     .body(new ApiSingleResponse<>(false, e.getMessage(), null));
@@ -134,7 +134,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
 
             ProjetDto updated = projetService.update(dto.getId(), dto);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Projet mis à jour avec succès", updated)
+                    new ApiSingleResponse<>(true, "Projet mis à jour avec succès", attachPermittedActions(updated))
             );
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest()
@@ -153,7 +153,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto cancelled = projetService.cancel(id);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Projet annulé avec succès", cancelled)
+                    new ApiSingleResponse<>(true, "Projet annulé avec succès", attachPermittedActions(cancelled))
             );
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -169,7 +169,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto deleted = projetService.delete(id);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Projet supprimé avec succès", deleted)
+                    new ApiSingleResponse<>(true, "Projet supprimé avec succès", attachPermittedActions(deleted))
             );
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -204,7 +204,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto updated = projetService.updateStatus(id, statut);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Statut du projet mis à jour avec succès", updated)
+                    new ApiSingleResponse<>(true, "Statut du projet mis à jour avec succès", attachPermittedActions(updated))
             );
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
@@ -226,7 +226,7 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
         try {
             ProjetDto updated = projetService.updateStatusByCode(code, statut);
             return ResponseEntity.ok(
-                    new ApiSingleResponse<>(true, "Statut du projet mis à jour avec succès", updated)
+                    new ApiSingleResponse<>(true, "Statut du projet mis à jour avec succès", attachPermittedActions(updated))
             );
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()

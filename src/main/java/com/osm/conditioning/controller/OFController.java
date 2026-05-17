@@ -37,7 +37,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> getOFById(@PathVariable UUID id) {
         try {
             OrdreFabricationDto of = ofService.findById(id);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", e.getMessage()));
@@ -50,7 +50,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> getAllOF() {
         try {
             List<OrdreFabricationDto> list = ofService.findAll();
-            return ResponseEntity.ok(list);
+            return ResponseEntity.ok(attachPermittedActions(list));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -59,14 +59,14 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
 
     @GetMapping("/project/{projectId}")
     public ResponseEntity<List<OrdreFabricationDto>> getOFByProject(@PathVariable UUID projectId) {
-        return ResponseEntity.ok(ofService.getByProject(projectId));
+        return ResponseEntity.ok(attachPermittedActions(ofService.getByProject(projectId)));
     }
 
     @PostMapping("/create")
     public ResponseEntity<ApiResponse<OrdreFabricationDto>> creerOF(@RequestBody OrdreFabricationDto dto) {
         try {
             OrdreFabricationDto created = ofService.creerOF(dto);
-            return ResponseEntity.ok(new ApiResponse<>(true, "OF créé avec succès", created));
+            return ResponseEntity.ok(new ApiResponse<>(true, "OF créé avec succès", attachPermittedActions(created)));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest()
                     .body(new ApiResponse<>(false, e.getMessage(), null));
@@ -77,7 +77,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> demarrerOF(@PathVariable UUID id) {
         try {
             OrdreFabricationDto of = ofService.demarrerOF(id);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -88,7 +88,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> pauseOF(@PathVariable UUID id) {
         try {
             OrdreFabricationDto of = ofService.mettreEnPause(id);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -103,7 +103,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> reprendreOF(@PathVariable UUID id) {
         try {
             OrdreFabricationDto of = ofService.reprendreOF(id);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -114,7 +114,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> cloturerOF(@PathVariable UUID id) {
         try {
             OrdreFabricationDto of = ofService.cloturerOF(id);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -125,7 +125,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> saisirProduction(@PathVariable UUID id, @RequestBody SaisieProductionDto dto) {
         try {
             OrdreFabricationDto of = ofService.saisirProduction(id, dto);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));
@@ -136,7 +136,7 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
     public ResponseEntity<?> ajusterConsommation(@PathVariable UUID id, @RequestBody AjustementConsommationDto ajustement) {
         try {
             OrdreFabricationDto of = ofService.ajusterConsommation(id, ajustement);
-            return ResponseEntity.ok(of);
+            return ResponseEntity.ok(attachPermittedActions(of));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", e.getMessage()));

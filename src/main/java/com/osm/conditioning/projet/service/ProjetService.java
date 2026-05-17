@@ -18,6 +18,7 @@ import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -27,6 +28,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,7 +39,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     private static final String STATUT_BROUILLON = "BROUILLON";
     private static final String STATUT_ANNULE = "ANNULE";
-    private static final String CODE_PREFIX = "PRJ-";
     private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
@@ -49,7 +53,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
             ShippingInfoService shippingInfoService,
-            ClientService clientService, 
+            ClientService clientService,
             ClientRepository clientRepository,
             clientInventaire clientInventaire
     ) {
@@ -261,7 +265,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                         new EntityNotFoundException("Projet non trouve : " + id));
 
         projet.setStatut(STATUT_ANNULE);
-        
+
         // Release reservations
         if (projet.getReservations() != null) {
             for (ProjetReservation res : projet.getReservations()) {
@@ -368,7 +372,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             }
         }
     }
-    
+
     private void calculateAndSetReservations(Projet projet) {
         // 1. Release previous reservations if they exist
         if (projet.getReservations() != null && !projet.getReservations().isEmpty()) {
@@ -414,7 +418,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             pr.setProjet(projet);
             pr.setArticleId(entry.getKey());
             pr.setQuantiteReservee(entry.getValue());
-            
+
             // Physical reservation in Inventory Service
             try {
                 Map<String, Object> payload = new HashMap<>();
@@ -425,7 +429,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 System.err.println("Failed to reserve stock for article: " + entry.getKey() + " - " + e.getMessage());
                 pr.setStatut("FAILED");
             }
-            
+
             projet.getReservations().add(pr);
         }
     }
@@ -438,7 +442,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     }
 
     private String generateCode() {
-        return CODE_PREFIX + System.currentTimeMillis();
+        return generateBusinessCode("code", "PR");
     }
 
     private ProjetDto toDto(Projet projet) {
@@ -543,5 +547,18 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         return clientId;
+    }
+
+    @Override
+    public Set<Action> actionsMapping(Projet projet) {
+        return Set.of(
+                Action.READ,
+                Action.CREATE,
+                Action.UPDATE,
+                Action.DELETE,
+                Action.CANCEL,
+                Action.UPDATE_STATUS,
+                Action.GEN_PDF
+        );
     }
 }

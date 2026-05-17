@@ -57,7 +57,7 @@ public class CertificationController
                     new ApiSingleResponse<>(
                             true,
                             "Certification found successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {
@@ -84,7 +84,7 @@ public class CertificationController
                     new ApiResponse<>(
                             true,
                             "Certifications retrieved successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {
@@ -120,7 +120,7 @@ public class CertificationController
                     new ApiResponse<>(
                             true,
                             "Certification page retrieved successfully",
-                            result.toList()
+                            attachPermittedActions(result.toList())
                     )
             );
         } catch (Exception e) {
@@ -154,7 +154,7 @@ public class CertificationController
                     new ApiSingleResponse<>(
                             true,
                             "Certification created successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {
@@ -188,7 +188,7 @@ public class CertificationController
                     new ApiSingleResponse<>(
                             true,
                             "Certification updated successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {
@@ -252,7 +252,7 @@ public class CertificationController
                     new ApiSingleResponse<>(
                             true,
                             "Certification deleted successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {
@@ -274,7 +274,7 @@ public class CertificationController
                     new ApiSingleResponse<>(
                             true,
                             "Certification found successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {
@@ -296,7 +296,7 @@ public class CertificationController
                     new ApiSingleResponse<>(
                             true,
                             "Certification found successfully",
-                            result
+                            attachPermittedActions(result)
                     )
             );
         } catch (Exception e) {

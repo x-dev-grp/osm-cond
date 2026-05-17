@@ -16,6 +16,7 @@ import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -433,6 +434,22 @@ public class ShippingInfoService extends BaseServiceImpl<ShippingInfo, ShippingI
     }
 
     private String generateShippingNumber() {
-        return "SHP-" + System.currentTimeMillis();
+        return generateBusinessCode("shippingNumber", "SH");
+    }
+
+    @Override
+    public Set<Action> actionsMapping(ShippingInfo shippingInfo) {
+        return Set.of(
+                Action.READ,
+                Action.CREATE,
+                Action.UPDATE,
+                Action.DELETE,
+                Action.ADD_LINE,
+                Action.REMOVE_LINE,
+                Action.UPDATE_STATUS,
+                Action.SHIP,
+                Action.DELIVER,
+                Action.GEN_PDF
+        );
     }
 }

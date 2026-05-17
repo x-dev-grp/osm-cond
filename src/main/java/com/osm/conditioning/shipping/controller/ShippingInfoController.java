@@ -34,12 +34,12 @@ public class ShippingInfoController extends BaseControllerImpl<ShippingInfo, Shi
 
     @GetMapping("/project/{projectId}")
     public ResponseEntity<ShippingInfoDto> getByProject(@PathVariable UUID projectId) {
-        return ResponseEntity.ok(shippingInfoService.getOrCreateByProjectId(projectId));
+        return ResponseEntity.ok(attachPermittedActions(shippingInfoService.getOrCreateByProjectId(projectId)));
     }
 
     @GetMapping("/{shippingId}")
     public ResponseEntity<ShippingInfoDto> getById(@PathVariable UUID shippingId) {
-        return ResponseEntity.ok(shippingInfoService.getById(shippingId));
+        return ResponseEntity.ok(attachPermittedActions(shippingInfoService.getById(shippingId)));
     }
 
     @PutMapping("/project/{projectId}")
@@ -47,7 +47,7 @@ public class ShippingInfoController extends BaseControllerImpl<ShippingInfo, Shi
             @PathVariable UUID projectId,
             @RequestBody ShippingInfoUpsertRequest request
     ) {
-        return ResponseEntity.ok(shippingInfoService.upsertProjectShipping(projectId, request));
+        return ResponseEntity.ok(attachPermittedActions(shippingInfoService.upsertProjectShipping(projectId, request)));
     }
 
     @PostMapping("/project/{projectId}/lines")
@@ -56,7 +56,7 @@ public class ShippingInfoController extends BaseControllerImpl<ShippingInfo, Shi
             @Valid @RequestBody ShippingLineCreateRequest request
     ) {
         ShippingInfoDto dto = shippingInfoService.addLine(projectId, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(attachPermittedActions(dto));
     }
 
     @DeleteMapping("/{shippingId}/lines/{lineId}")
@@ -64,7 +64,7 @@ public class ShippingInfoController extends BaseControllerImpl<ShippingInfo, Shi
             @PathVariable UUID shippingId,
             @PathVariable UUID lineId
     ) {
-        return ResponseEntity.ok(shippingInfoService.removeLine(shippingId, lineId));
+        return ResponseEntity.ok(attachPermittedActions(shippingInfoService.removeLine(shippingId, lineId)));
     }
 
     @PostMapping("/{shippingId}/events")
@@ -72,7 +72,7 @@ public class ShippingInfoController extends BaseControllerImpl<ShippingInfo, Shi
             @PathVariable UUID shippingId,
             @Valid @RequestBody ShippingEventCreateRequest request
     ) {
-        return ResponseEntity.ok(shippingInfoService.addEvent(shippingId, request));
+        return ResponseEntity.ok(attachPermittedActions(shippingInfoService.addEvent(shippingId, request)));
     }
 
     @PutMapping("/{shippingId}/status")
@@ -80,7 +80,7 @@ public class ShippingInfoController extends BaseControllerImpl<ShippingInfo, Shi
             @PathVariable UUID shippingId,
             @Valid @RequestBody ShippingStatusUpdateRequest request
     ) {
-        return ResponseEntity.ok(shippingInfoService.updateStatus(shippingId, request));
+        return ResponseEntity.ok(attachPermittedActions(shippingInfoService.updateStatus(shippingId, request)));
     }
 
     @GetMapping("/{shippingId}/qr-image")

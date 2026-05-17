@@ -3,6 +3,7 @@ package com.osm.conditioning.service;
 import com.osm.conditioning.dto.CertificationDto;
 import com.osm.conditioning.model.Certification;
 import com.osm.conditioning.repository.CertificationRepository;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -22,6 +24,11 @@ public class CertificationService extends BaseServiceImpl<Certification, Certifi
     public CertificationService(CertificationRepository certificationRepository, ModelMapper modelMapper) {
         super(certificationRepository, modelMapper);
         this.certificationRepository = certificationRepository;
+    }
+
+    @Override
+    public Set<Action> actionsMapping(Certification certification) {
+        return Set.of(Action.READ, Action.CREATE, Action.UPDATE, Action.DELETE, Action.VALIDATE, Action.GEN_PDF);
     }
 
     @Override

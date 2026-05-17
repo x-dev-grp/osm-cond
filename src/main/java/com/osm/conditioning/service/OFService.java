@@ -14,6 +14,7 @@ import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.Component.QrConfig;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -435,7 +436,23 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     private String generateCode() {
-        return "OF-" + System.currentTimeMillis();
+        return generateBusinessCode("code", "OF");
+    }
+
+    @Override
+    public Set<Action> actionsMapping(OrdreFabrication ordreFabrication) {
+        return Set.of(
+                Action.READ,
+                Action.CREATE,
+                Action.UPDATE,
+                Action.DELETE,
+                Action.START,
+                Action.PAUSE,
+                Action.RESUME,
+                Action.CLOSE,
+                Action.AJUSTER_STOCK,
+                Action.GEN_PDF
+        );
     }
 
     @Override

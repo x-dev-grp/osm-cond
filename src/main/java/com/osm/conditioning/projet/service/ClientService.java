@@ -168,10 +168,7 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
 
 
     private String genererCodeClient() {
-        String prefix = "CLT";
-        String date = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
-        String random = String.format("%04d", (int) (Math.random() * 10000));
-        return prefix + "-" + date + "-" + random;
+        return generateBusinessCode("codeClient", "CL");
     }
 
 

@@ -24,6 +24,7 @@ import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -691,6 +692,24 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     }
 
     private String generateExpeditionNumber() {
-        return "EXP-" + System.currentTimeMillis();
+        return generateBusinessCode("expeditionNumber", "EX");
+    }
+
+    @Override
+    public Set<Action> actionsMapping(Expedition expedition) {
+        return Set.of(
+                Action.READ,
+                Action.CREATE,
+                Action.UPDATE,
+                Action.DELETE,
+                Action.ADD_LINE,
+                Action.REMOVE_LINE,
+                Action.VALIDATE,
+                Action.SHIP,
+                Action.DELIVER,
+                Action.CLOSE,
+                Action.CANCEL,
+                Action.GEN_PDF
+        );
     }
 }

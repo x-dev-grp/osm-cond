@@ -3,7 +3,7 @@ package com.osm.conditioning.expedition.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.client.clientProductionStorage;
-import com.osm.conditioning.dto.ProductDto;
+import com.osm.conditioning.dto.ProduitFinalDto;
 import com.osm.conditioning.expedition.dto.GenealogyDto;
 import com.osm.conditioning.expedition.model.Expedition;
 import com.osm.conditioning.expedition.model.ExpeditionArticle;
@@ -80,7 +80,7 @@ public class TraceabilityService {
             
             if (of.getProductId() != null) {
                 try {
-                    ProductDto product = inventaireClient.getProductById(of.getProductId());
+                    ProduitFinalDto product = inventaireClient.getProduitFinalById(of.getProductId());
                     if (product != null) ofSnapshot.put("articleName", product.getName());
                 } catch (Exception e) {
                     log.warn("Could not fetch article name for Product {}", of.getProductId());

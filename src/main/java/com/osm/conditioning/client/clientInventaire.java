@@ -14,7 +14,7 @@ import java.util.UUID;
 public interface clientInventaire {
 
     @GetMapping("/api/inventaire/products/{id}")
-    ProductDto getProductById(@PathVariable("id") UUID id);
+    ProduitFinalDto getProduitFinalById(@PathVariable("id") UUID id);
 
     @GetMapping("/api/inventaire/articles/{id}")
     ArticleSecDto getArticleById(@PathVariable("id") UUID id);

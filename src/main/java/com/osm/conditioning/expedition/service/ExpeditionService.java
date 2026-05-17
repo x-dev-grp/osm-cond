@@ -8,7 +8,7 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.dto.ArticleSecDto;
-import com.osm.conditioning.dto.ProductDto;
+import com.osm.conditioning.dto.ProduitFinalDto;
 import com.osm.conditioning.dto.StockSecDto;
 import com.osm.conditioning.expedition.dto.*;
 import com.osm.conditioning.expedition.enums.ExpeditionStatus;
@@ -540,7 +540,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             line.setArticleNameSnapshot(article.getNom());
         } else if (of != null && of.getProductId() != null) {
             try {
-                ProductDto product = inventaireClient.getProductById(of.getProductId());
+                ProduitFinalDto product = inventaireClient.getProduitFinalById(of.getProductId());
                 if (product != null && product.getName() != null) {
                     line.setArticleNameSnapshot(product.getName());
                 }

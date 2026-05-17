@@ -8,7 +8,7 @@ import com.osm.conditioning.client.clientProductionFiltration;
 import com.osm.conditioning.client.clientProductionOilTransaction;
 import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.client.clientSecurityCompanyProfile;
-import com.osm.conditioning.dto.ProductDto;
+import com.osm.conditioning.dto.ProduitFinalDto;
 import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.LabelSource;
 import com.osm.conditioning.repository.LabelContentRepository;
@@ -91,6 +91,23 @@ public class LabelContentService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<LabelContentDto> getByProductId(UUID productId) {
+        Map<UUID, LabelContent> unique = new LinkedHashMap<>();
+
+        for (LabelContent labelContent : labelContentRepository.findAllByProductIdAndIsDeletedFalse(productId)) {
+            unique.put(labelContent.getId(), labelContent);
+        }
+
+        for (LabelContent labelContent : labelContentRepository.findAllByPackagingIdAndIsDeletedFalse(productId)) {
+            unique.putIfAbsent(labelContent.getId(), labelContent);
+        }
+
+        return unique.values().stream()
+                .map(labelContent -> toDto(labelContent, validateLabel(labelContent)))
+                .toList();
+    }
+
     @Transactional
     public LabelContentDto generate(LabelGenerateRequestDto request) {
         UserContext currentUser = fetchCurrentUser();
@@ -101,7 +118,9 @@ public class LabelContentService {
         }
 
         StorageUnitDto storageUnit = response.getData();
-        ProductDto packaging = clientInventaire.getProductById(request.getPackagingId());
+        ProduitFinalDto packaging = clientInventaire.getProduitFinalById(request.getPackagingId());
+        UUID productId = request.getProductId() != null ? request.getProductId() : packaging.getId();
+        LabelContent latestProductLabel = findLatestLabelByProduct(productId);
 
         UUID tenantId = TenantContext.getCurrentTenant();
         if (tenantId == null) {
@@ -112,6 +131,7 @@ public class LabelContentService {
 
         LabelContent labelContent = new LabelContent();
         labelContent.setLotId(request.getLotId());
+        labelContent.setProductId(productId);
         labelContent.setPackagingId(request.getPackagingId());
         labelContent.setOperatorId(currentUser.id());
         labelContent.setLanguage(Optional.ofNullable(request.getLanguage()).orElse(LabelLanguage.FR));
@@ -121,6 +141,7 @@ public class LabelContentService {
         labelContent.setStatus(LabelContentStatus.DRAFT);
 
         prepareLabelContent(labelContent, storageUnit, packaging, companyProfile);
+        applyReusableDefaultsFromExistingLabel(labelContent, latestProductLabel);
 
         applyRequestQualityAndVariety(
                 labelContent,
@@ -237,6 +258,31 @@ public class LabelContentService {
                 .orElseThrow(() -> new EntityNotFoundException("Label content introuvable pour l'id: " + id));
     }
 
+    private LabelContent findLatestLabelByProduct(UUID productId) {
+        if (productId == null) {
+            return null;
+        }
+
+        return getByProductEntities(productId).stream()
+                .filter(labelContent -> !Boolean.TRUE.equals(labelContent.getDeleted()))
+                .max(Comparator.comparing(LabelContent::getCreatedDate, Comparator.nullsLast(Comparator.naturalOrder())))
+                .orElse(null);
+    }
+
+    private List<LabelContent> getByProductEntities(UUID productId) {
+        Map<UUID, LabelContent> unique = new LinkedHashMap<>();
+
+        for (LabelContent labelContent : labelContentRepository.findAllByProductIdAndIsDeletedFalse(productId)) {
+            unique.put(labelContent.getId(), labelContent);
+        }
+
+        for (LabelContent labelContent : labelContentRepository.findAllByPackagingIdAndIsDeletedFalse(productId)) {
+            unique.putIfAbsent(labelContent.getId(), labelContent);
+        }
+
+        return new ArrayList<>(unique.values());
+    }
+
     private LabelContent ensureQrCode(LabelContent labelContent) {
         if (!isBlank(labelContent.getQrHex())) {
             return labelContent;
@@ -246,9 +292,9 @@ public class LabelContentService {
         return labelContentRepository.save(labelContent);
     }
 
-    private ProductDto loadPackaging(UUID packagingId) {
+    private ProduitFinalDto loadPackaging(UUID packagingId) {
         try {
-            return clientInventaire.getProductById(packagingId);
+            return clientInventaire.getProduitFinalById(packagingId);
         } catch (Exception ignored) {
             throw new EntityNotFoundException("Packaging introuvable pour l'id: " + packagingId);
         }
@@ -257,7 +303,7 @@ public class LabelContentService {
     private void prepareLabelContent(
             LabelContent labelContent,
             StorageUnitDto storageUnit,
-            ProductDto packaging,
+            ProduitFinalDto packaging,
             CompanyProfileDto companyProfile) {
         labelContent.setLotNumber(storageUnit.getLotNumber());
 
@@ -286,10 +332,57 @@ public class LabelContentService {
         labelContent.setCertifications(new ArrayList<>());
     }
 
+    private void applyReusableDefaultsFromExistingLabel(LabelContent target, LabelContent source) {
+        if (source == null) {
+            return;
+        }
+
+        if (source.getLanguage() != null) {
+            target.setLanguage(source.getLanguage());
+        }
+        if (source.getLabelCategory() != null) {
+            target.setLabelCategory(source.getLabelCategory());
+        }
+        if (!isBlank(source.getLegalDenomination())) {
+            target.setLegalDenomination(source.getLegalDenomination());
+        }
+        if (!isBlank(source.getOriginCountry())) {
+            target.setOriginCountry(source.getOriginCountry());
+        }
+        if (!isBlank(source.getNetQuantity())) {
+            target.setNetQuantity(source.getNetQuantity());
+        }
+        if (!isBlank(source.getStorageConditions())) {
+            target.setStorageConditions(source.getStorageConditions());
+        }
+        if (!isBlank(source.getResponsibleName())) {
+            target.setResponsibleName(source.getResponsibleName());
+        }
+        if (!isBlank(source.getResponsibleAddress())) {
+            target.setResponsibleAddress(source.getResponsibleAddress());
+        }
+        if (!isBlank(source.getQualityGrade())) {
+            target.setQualityGrade(source.getQualityGrade());
+        }
+        if (!isBlank(source.getVariety())) {
+            target.setVariety(source.getVariety());
+        }
+        if (!isBlank(source.getExtractionMethod())) {
+            target.setExtractionMethod(source.getExtractionMethod());
+        }
+        if (!isBlank(source.getSensoryProfile())) {
+            target.setSensoryProfile(source.getSensoryProfile());
+        }
+
+        target.setCertifications(new ArrayList<>(safeList(source.getCertifications())));
+        target.setClaimTypes(new LinkedHashSet<>(safeSet(source.getClaimTypes())));
+        target.setMarketingClaims(new ArrayList<>(safeList(source.getMarketingClaims())));
+    }
+
     private void saveSourceProofs(
             LabelContent labelContent,
             StorageUnitDto storageUnit,
-            ProductDto packaging,
+            ProduitFinalDto packaging,
             UserContext currentUser,
             CompanyProfileDto companyProfile,
             UUID filtrationOperationId
@@ -460,7 +553,7 @@ public class LabelContentService {
         return String.format(Locale.ROOT, "%.0f ml", volume);
     }
 
-    private String calculateQuantity(ProductDto packaging, LabelCategory category) {
+    private String calculateQuantity(ProduitFinalDto packaging, LabelCategory category) {
         if (packaging == null) {
             return null;
         }
@@ -905,6 +998,7 @@ public class LabelContentService {
         dto.setDeleted(labelContent.getDeleted());
         dto.setExternalId(labelContent.getExternalId());
         dto.setLotId(labelContent.getLotId());
+        dto.setProductId(labelContent.getProductId());
         dto.setPackagingId(labelContent.getPackagingId());
         dto.setOperatorId(labelContent.getOperatorId());
         dto.setFiltrationOperationId(labelContent.getFiltrationOperationId());

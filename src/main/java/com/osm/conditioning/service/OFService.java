@@ -133,7 +133,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             throw new RuntimeException("La BOM est obligatoire (non dÃ©finie dans l'OF ni dans le projet)");
         }
 
-        ProductDto product = clientInventaire.getProductById(dto.getProductId());
+        ProduitFinalDto product = clientInventaire.getProduitFinalById(dto.getProductId());
         if (product == null) {
             throw new RuntimeException("Produit non trouve avec l'id : " + dto.getProductId());
         }
@@ -394,7 +394,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     private OrdreFabricationDto convertToDto(OrdreFabrication of) {
         OrdreFabricationDto dto = modelMapper.map(of, OrdreFabricationDto.class);
         try {
-            ProductDto product = clientInventaire.getProductById(of.getProductId());
+            ProduitFinalDto product = clientInventaire.getProduitFinalById(of.getProductId());
             dto.setProductName(product.getName());
         } catch (Exception e) {
             dto.setProductName("N/A");

@@ -92,6 +92,24 @@ public class LabelContentController {
         }
     }
 
+    @GetMapping("/product/{productId}")
+    public ResponseEntity<ApiResponse<List<LabelContentDto>>> getByProductId(@PathVariable UUID productId) {
+        long startTime = System.currentTimeMillis();
+        OSMLogger.logMethodEntry(this.getClass(), "getByProductId", productId);
+
+        try {
+            List<LabelContentDto> result = labelContentService.getByProductId(productId);
+
+            OSMLogger.logMethodExit(this.getClass(), "getByProductId", result);
+            OSMLogger.logPerformance(this.getClass(), "getByProductId", startTime, System.currentTimeMillis());
+
+            return success(HttpStatus.OK, "Etiquettes du produit recuperees avec succes", result);
+        } catch (Exception e) {
+            OSMLogger.logException(this.getClass(), "getByProductId", e);
+            return failure(HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne lors de la lecture des etiquettes du produit");
+        }
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<LabelContentDto>> update(
             @PathVariable UUID id,

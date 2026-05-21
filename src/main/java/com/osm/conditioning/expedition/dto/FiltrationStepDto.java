@@ -1,6 +1,7 @@
 package com.osm.conditioning.expedition.dto;
 
 import lombok.Data;
+import java.util.Map;
 import java.util.UUID;
 
 @Data
@@ -13,4 +14,5 @@ public class FiltrationStepDto {
     
     private UUID sourceStorageUnitId;
     private String sourceStorageUnitName;
+    private Map<String, String> qualityControls;
 }

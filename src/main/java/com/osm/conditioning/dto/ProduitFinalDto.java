@@ -2,6 +2,7 @@ package com.osm.conditioning.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.osm.conditioning.Enum.ProductType;
 import com.xdev.communicator.models.common.dtos.BaseDto;
 import lombok.Data;
 import lombok.Getter;

@@ -1,4 +1,4 @@
-package com.osm.conditioning.dto;
+package com.osm.conditioning.Enum;
 
 public enum ProductType {
     VRAC,

@@ -200,7 +200,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         payload.put("publicCode", expedition.getQrHex());
         payload.put("expeditionNumber", expedition.getExpeditionNumber());
         payload.put("status", expedition.getStatus() != null ? expedition.getStatus().name() : null);
-        payload.put("clientId", expedition.getId());
+        payload.put("clientId", getExpeditionClientId(expedition));
 
         if (expedition.getProjet() != null) {
             payload.put("projetId", expedition.getProjet().getId());
@@ -285,7 +285,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         expedition.setStatus(ExpeditionStatus.VALIDATED);
         expedition.setValidatedAt(LocalDateTime.now());
         appendActionComment(expedition, "VALIDATED", request);
-        
+
         // Capture irreversible traceability snapshot
         traceabilityService.captureTraceabilitySnapshot(expedition);
 
@@ -464,8 +464,12 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     /* ──────────────────────── PRIVATE HELPERS ──────────────────────── */
 
     private void validateOfBelongsToProject(UUID ofId, UUID projectId) {
-        OrdreFabrication of = ofRepository.findById(ofId)
-                .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
+        OrdreFabrication of = ofRepository.findById(ofId).orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
+
+        if (of.getProjet() == null || of.getProjet().getId() == null) {
+            throw new IllegalArgumentException("L'ordre de fabrication n'est rattache a aucun projet");
+        }
+
         if (!Objects.equals(of.getProjet().getId(), projectId)) {
             throw new IllegalArgumentException("L'ordre de fabrication n'appartient pas au projet de l'expedition");
         }
@@ -484,7 +488,12 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             Integer requiredQuantity = entry.getValue();
 
             StockSecDto stock = inventaireClient.getStockByArticle(articleId);
-            Integer available = stock != null ? stock.getQuantiteActuelle() : null;
+            Integer available = null;
+            if (stock != null) {
+                available = stock.getQuantiteDisponible() != null
+                        ? stock.getQuantiteDisponible()
+                        : stock.getQuantiteActuelle();
+            }
             if (available == null || available < requiredQuantity) {
                 throw new IllegalStateException("Stock insuffisant pour l'article " + articleId + " : disponible " + available + ", requis " + requiredQuantity);
             }
@@ -498,9 +507,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
 
         OrdreFabrication of = null;
         if (request.getOfId() != null) {
-            validateOfBelongsToProject(request.getOfId(), expedition.getProjet().getId());
-            of = ofRepository.findById(request.getOfId())
-                    .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + request.getOfId()));
+            of = assignOrValidateOfProject(request.getOfId(), expedition.getProjet());
 
             if ((quantity == null || quantity <= 0) && of.getQuantiteBonne() != null && of.getQuantiteBonne().signum() > 0) {
                 quantity = of.getQuantiteBonne().intValue();
@@ -557,6 +564,26 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         line.setUnit(unit);
 
         expedition.getLines().add(line);
+    }
+
+    private OrdreFabrication assignOrValidateOfProject(UUID ofId, Projet project) {
+        OrdreFabrication of = ofRepository.findById(ofId)
+                .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
+
+        if (project == null || project.getId() == null) {
+            throw new IllegalArgumentException("Projet expedition invalide");
+        }
+
+        if (of.getProjet() == null || of.getProjet().getId() == null) {
+            of.setProjet(project);
+            return ofRepository.save(of);
+        }
+
+        if (!Objects.equals(of.getProjet().getId(), project.getId())) {
+            throw new IllegalArgumentException("L'ordre de fabrication n'appartient pas au projet de l'expedition");
+        }
+
+        return of;
     }
 
     private Expedition findExpedition(UUID expeditionId) {
@@ -624,7 +651,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         ExpeditionDto dto = new ExpeditionDto();
         dto.setId(expedition.getId());
         dto.setExpeditionNumber(expedition.getExpeditionNumber());
-        dto.setClientId(expedition.getId());
+        dto.setClientId(getExpeditionClientId(expedition));
         dto.setStatus(expedition.getStatus());
         dto.setDestination(expedition.getDestination());
         dto.setPlannedShipDate(expedition.getPlannedShipDate());
@@ -675,6 +702,22 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         dto.setTotalVolume(totalVolume);
 
         return dto;
+    }
+
+    private UUID getExpeditionClientId(Expedition expedition) {
+        if (expedition == null) {
+            return null;
+        }
+
+        if (expedition.getClientId() != null) {
+            return expedition.getClientId();
+        }
+
+        if (expedition.getProjet() != null && expedition.getProjet().getClient() != null) {
+            return expedition.getProjet().getClient().getId();
+        }
+
+        return null;
     }
 
     private ExpeditionArticleDto toLineDto(ExpeditionArticle line) {

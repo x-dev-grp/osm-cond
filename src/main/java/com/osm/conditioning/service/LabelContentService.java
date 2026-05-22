@@ -9,6 +9,7 @@ import com.osm.conditioning.client.clientProductionOilTransaction;
 import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.client.clientSecurityCompanyProfile;
 import com.osm.conditioning.dto.ProduitFinalDto;
+import com.osm.conditioning.expedition.dto.GenealogyDto;
 import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.LabelSource;
 import com.osm.conditioning.repository.LabelContentRepository;
@@ -87,6 +88,7 @@ public class LabelContentService {
         return labelContentRepository.findAll()
                 .stream()
                 .filter(labelContent -> !Boolean.TRUE.equals(labelContent.getDeleted()))
+                .peek(this::ensureTraceabilityLotId)
                 .map(labelContent -> toDto(labelContent, validateLabel(labelContent)))
                 .toList();
     }
@@ -104,6 +106,7 @@ public class LabelContentService {
         }
 
         return unique.values().stream()
+                .peek(this::ensureTraceabilityLotId)
                 .map(labelContent -> toDto(labelContent, validateLabel(labelContent)))
                 .toList();
     }
@@ -118,6 +121,7 @@ public class LabelContentService {
         }
 
         StorageUnitDto storageUnit = response.getData();
+        GenealogyDto genealogy = fetchGenealogy(request.getLotId());
         ProduitFinalDto packaging = clientInventaire.getProduitFinalById(request.getPackagingId());
         UUID productId = request.getProductId() != null ? request.getProductId() : packaging.getId();
         LabelContent latestProductLabel = findLatestLabelByProduct(productId);
@@ -131,6 +135,7 @@ public class LabelContentService {
 
         LabelContent labelContent = new LabelContent();
         labelContent.setLotId(request.getLotId());
+        labelContent.setTraceabilityLotId(resolveTraceabilityLotId(request.getLotId(), request.getTraceabilityLotId(), genealogy));
         labelContent.setProductId(productId);
         labelContent.setPackagingId(request.getPackagingId());
         labelContent.setOperatorId(currentUser.id());
@@ -149,7 +154,7 @@ public class LabelContentService {
                 request.getVariety()
         );
 
-        saveSourceProofs(labelContent, storageUnit, packaging, currentUser, companyProfile, request.getFiltrationOperationId());
+        saveSourceProofs(labelContent, storageUnit, genealogy, packaging, currentUser, companyProfile, request.getFiltrationOperationId());
 
         LabelContent saved = ensureQrCode(labelContentRepository.save(labelContent));
         return toDto(saved, validateLabel(saved));
@@ -158,6 +163,7 @@ public class LabelContentService {
     @Transactional(readOnly = true)
     public LabelContentDto getById(UUID id) {
         LabelContent labelContent = findLabelOrThrow(id);
+        ensureTraceabilityLotId(labelContent);
         return toDto(labelContent, validateLabel(labelContent));
     }
 
@@ -168,6 +174,7 @@ public class LabelContentService {
         }
 
         LabelContent labelContent = findLabelOrThrow(id);
+        ensureTraceabilityLotId(labelContent);
 
         if (labelContent.getStatus() == LabelContentStatus.FINALIZED) {
             throw new IllegalStateException("Le contenu finalise ne peut plus etre modifie");
@@ -203,6 +210,7 @@ public class LabelContentService {
     @Transactional
     public LabelContentDto markAsDraft(UUID id) {
         LabelContent labelContent = findLabelOrThrow(id);
+        ensureTraceabilityLotId(labelContent);
 
         if (labelContent.getStatus() == LabelContentStatus.FINALIZED) {
             throw new IllegalStateException("Une etiquette finalisee ne peut pas etre remise en brouillon");
@@ -220,6 +228,7 @@ public class LabelContentService {
     @Transactional(readOnly = true)
     public LabelExportDto export(UUID id) {
         LabelContent labelContent = findLabelOrThrow(id);
+        ensureTraceabilityLotId(labelContent);
 
         if (labelContent.getStatus() != LabelContentStatus.FINALIZED) {
             throw new IllegalStateException("Seule une etiquette finalisee peut etre exportee");
@@ -231,6 +240,7 @@ public class LabelContentService {
     @Transactional
     public LabelContentDto approve(UUID id) {
         LabelContent labelContent = findLabelOrThrow(id);
+        ensureTraceabilityLotId(labelContent);
 
         defaultLegalDenomination(labelContent);
 
@@ -382,13 +392,20 @@ public class LabelContentService {
     private void saveSourceProofs(
             LabelContent labelContent,
             StorageUnitDto storageUnit,
+            GenealogyDto genealogy,
             ProduitFinalDto packaging,
             UserContext currentUser,
             CompanyProfileDto companyProfile,
             UUID filtrationOperationId
     ) {
         labelContent.getSourceSnapshots().clear();
-        addSnapshot(labelContent, LabelSourceType.FILTERED_LOT, storageUnit.getId(), storageUnit.getLotNumber(), storageUnit);
+        addSnapshot(
+                labelContent,
+                LabelSourceType.FILTERED_LOT,
+                labelContent.getTraceabilityLotId() != null ? labelContent.getTraceabilityLotId() : storageUnit.getId(),
+                storageUnit.getLotNumber(),
+                buildFilteredLotSnapshot(storageUnit, genealogy, labelContent)
+        );
         addSnapshot(labelContent, LabelSourceType.PACKAGING, packaging.getId(), packaging.getCode(), packaging);
         addSnapshot(labelContent, LabelSourceType.OPERATOR, currentUser.id(), currentUser.displayName(), currentUser.snapshot());
         if (companyProfile != null) {
@@ -406,6 +423,59 @@ public class LabelContentService {
                 OSMLogger.logException(this.getClass(), "saveSourceProofs - filtration", e);
             }
         }
+    }
+
+    private GenealogyDto fetchGenealogy(UUID lotId) {
+        try {
+            ApiResponse<GenealogyDto> genealogyResponse = clientProductionStorage.getGenealogy(lotId);
+            if (genealogyResponse != null && genealogyResponse.isSuccess()) {
+                return genealogyResponse.getData();
+            }
+        } catch (Exception e) {
+            OSMLogger.logException(this.getClass(), "fetchGenealogy", e);
+        }
+        return null;
+    }
+
+    private UUID resolveTraceabilityLotId(UUID lotId, UUID requestedTraceabilityLotId, GenealogyDto genealogy) {
+        if (requestedTraceabilityLotId != null) {
+            return requestedTraceabilityLotId;
+        }
+        if (genealogy != null && genealogy.getTraceabilityLotId() != null) {
+            return genealogy.getTraceabilityLotId();
+        }
+        return lotId;
+    }
+
+    private void ensureTraceabilityLotId(LabelContent labelContent) {
+        if (labelContent == null || labelContent.getTraceabilityLotId() != null || labelContent.getLotId() == null) {
+            return;
+        }
+
+        GenealogyDto genealogy = fetchGenealogy(labelContent.getLotId());
+        UUID resolved = resolveTraceabilityLotId(labelContent.getLotId(), null, genealogy);
+        if (resolved != null && !resolved.equals(labelContent.getTraceabilityLotId())) {
+            labelContent.setTraceabilityLotId(resolved);
+            labelContentRepository.save(labelContent);
+        }
+    }
+
+    private Map<String, Object> buildFilteredLotSnapshot(
+            StorageUnitDto storageUnit,
+            GenealogyDto genealogy,
+            LabelContent labelContent
+    ) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("storageUnitId", storageUnit.getId());
+        snapshot.put("storageUnitName", storageUnit.getName());
+        snapshot.put("traceabilityLotId", labelContent.getTraceabilityLotId());
+        snapshot.put("rootReceptionId", genealogy != null ? genealogy.getRootReceptionId() : null);
+        snapshot.put("traceabilitySourceType", genealogy != null ? genealogy.getTraceabilitySourceType() : null);
+        snapshot.put("lotNumber", storageUnit.getLotNumber());
+        snapshot.put("qualityGrade", storageUnit.getQualityGrade());
+        snapshot.put("oilVariety", storageUnit.getOilType());
+        snapshot.put("genealogy", genealogy);
+        return snapshot;
     }
 
     private void addSnapshot(
@@ -602,6 +672,7 @@ public class LabelContentService {
         List<LabelValidationIssueDto> issues = new ArrayList<>();
 
         validateNotNull(issues, labelContent.getLotId(), "lotId", "Lot filtre absent");
+        validateNotNull(issues, labelContent.getTraceabilityLotId(), "traceabilityLotId", "Traceabilite lot absente");
         validateNotNull(issues, labelContent.getPackagingId(), "packagingId", "Packaging absent");
         validateNotNull(issues, labelContent.getOperatorId(), "operatorId", "Utilisateur courant introuvable");
         validateNotBlank(issues, labelContent.getLotNumber(), "lotNumber", "Numero de lot indisponible");
@@ -998,6 +1069,7 @@ public class LabelContentService {
         dto.setDeleted(labelContent.getDeleted());
         dto.setExternalId(labelContent.getExternalId());
         dto.setLotId(labelContent.getLotId());
+        dto.setTraceabilityLotId(labelContent.getTraceabilityLotId());
         dto.setProductId(labelContent.getProductId());
         dto.setPackagingId(labelContent.getPackagingId());
         dto.setOperatorId(labelContent.getOperatorId());

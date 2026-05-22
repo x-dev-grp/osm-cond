@@ -24,6 +24,9 @@ public class LabelContent extends BaseEntity {
     @Column(name = "lot_id", nullable = false)
     private UUID lotId;
 
+    @Column(name = "traceability_lot_id")
+    private UUID traceabilityLotId;
+
     @Column(name = "product_id")
     private UUID productId;
 

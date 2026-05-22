@@ -37,6 +37,7 @@ public class OrdreFabricationDto extends BaseDto<OrdreFabrication> {
     private UUID ligneId;
     private String ligneNom;
     private UUID lotVracId;
+    private UUID traceabilityLotId;
     private List<LigneOFDto> lignes;
     private UUID bomId;
      private String motifNC;

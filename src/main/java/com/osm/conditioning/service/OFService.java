@@ -10,11 +10,11 @@ import com.osm.conditioning.repository.OrdreFabricationRepository;
 import com.xdev.communicator.models.shared.ApiResponse;
 import com.xdev.communicator.models.shared.StorageUnitDto;
 import com.xdev.xdevbase.config.TenantContext;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.Component.QrConfig;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
-import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
 import jakarta.persistence.EntityNotFoundException;
@@ -86,6 +86,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     public OrdreFabricationDto findById(UUID id) {
         OrdreFabrication of = repository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Entity not found with this id " + id));
+        ensureTraceabilityLotId(of);
         return convertToDto(of);
     }
 
@@ -93,6 +94,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     public List<OrdreFabricationDto> findAll() {
         UUID tenantId = TenantContext.getCurrentTenant();
         return repository.findAllByTenantIdAndIsDeletedFalse(tenantId).stream()
+                .peek(this::ensureTraceabilityLotId)
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
     }
@@ -100,6 +102,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional(readOnly = true)
     public List<OrdreFabricationDto> getByProject(UUID projectId) {
         return ofRepository.findAllByProjetIdAndIsDeletedFalse(projectId).stream()
+                .peek(this::ensureTraceabilityLotId)
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
     }
@@ -121,8 +124,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                     dto.setBomId(seulProduit.getBomId());
                 }
             } else if (projet.getProduits() != null && projet.getProduits().size() > 1) {
-                // Si le projet a plusieurs produits, l'utilisateur doit en choisir un
-                throw new RuntimeException("Ce projet contient plusieurs produits. Veuillez spécifier le SKU pour cet OF.");
+                throw new RuntimeException("Ce projet contient plusieurs produits. Veuillez specifier le SKU pour cet OF.");
             }
         }
 
@@ -130,7 +132,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             throw new RuntimeException("Le produit est obligatoire (non defini dans l'OF ni dans le projet)");
         }
         if (dto.getBomId() == null) {
-            throw new RuntimeException("La BOM est obligatoire (non dÃ©finie dans l'OF ni dans le projet)");
+            throw new RuntimeException("La BOM est obligatoire (non definie dans l'OF ni dans le projet)");
         }
 
         ProduitFinalDto product = clientInventaire.getProduitFinalById(dto.getProductId());
@@ -140,7 +142,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         BOMDto bom = clientInventaire.getBomById(dto.getBomId());
         if (bom == null) {
-            throw new RuntimeException("BOM non trouvÃ©e avec l'id : " + dto.getBomId());
+            throw new RuntimeException("BOM non trouvee avec l'id : " + dto.getBomId());
         }
         if (!bom.getProductId().equals(dto.getProductId())) {
             throw new RuntimeException("La BOM selectionnee ne correspond pas au produit");
@@ -148,7 +150,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         if (dto.getLigneId() != null) {
             LigneConditionnementDto ligne = clientInventaire.getLigneById(dto.getLigneId());
             if (ligne == null) {
-                throw new RuntimeException("Ligne non trouvÃ©e avec l'id : " + dto.getLigneId());
+                throw new RuntimeException("Ligne non trouvee avec l'id : " + dto.getLigneId());
             }
         }
         BigDecimal quantiteCible = dto.getQuantiteCible();
@@ -157,17 +159,8 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             validateProjectQuantity(projet, quantiteCible, null);
         }
 
-        // Validation de la cuve d'huile (lot vrac)
         if (dto.getLotVracId() != null) {
-            try {
-               ApiResponse<StorageUnitDto> resp =
-                        productionStorageClient.getStorageUnit(dto.getLotVracId());
-                if (resp == null || !resp.isSuccess() || resp.getData() == null) {
-                    throw new RuntimeException("Cuve d'huile introuvable (ID: " + dto.getLotVracId() + ")");
-                }
-            } catch (Exception e) {
-                log.warn("Erreur validation cuve: {}", e.getMessage());
-            }
+            dto.setTraceabilityLotId(resolveTraceabilityLotId(dto.getLotVracId()));
         }
 
         OrdreFabrication of = new OrdreFabrication();
@@ -176,6 +169,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setBomId(bom.getId());
         of.setLigneId(dto.getLigneId());
         of.setLotVracId(dto.getLotVracId());
+        of.setTraceabilityLotId(dto.getTraceabilityLotId());
         of.setQuantiteCible(quantiteCible);
         of.setDateDebutPrevue(dto.getDateDebutPrevue());
         of.setDateFinPrevue(dto.getDateFinPrevue());
@@ -193,7 +187,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         OrdreFabrication saved = ofRepository.save(of);
 
-        // GÃ©nÃ©ration du QR
         QrCodeInfo qrInfo = generateQrInfo(saved.getClass().toString(), saved.getId());
         OrdreFabricationDto result = convertToDto(saved);
         result.setPublicCode(qrInfo.getPublicCode());
@@ -206,13 +199,12 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional
     public OrdreFabricationDto update(OrdreFabricationDto dto) {
         if (dto.getId() == null) {
-            throw new RuntimeException("L'ID est obligatoire pour la mise Ã  jour");
+            throw new RuntimeException("L'ID est obligatoire pour la mise a jour");
         }
 
         OrdreFabrication of = ofRepository.findById(dto.getId())
-                .orElseThrow(() -> new EntityNotFoundException("OF non trouvÃ© avec l'id : " + dto.getId()));
+                .orElseThrow(() -> new EntityNotFoundException("OF non trouve avec l'id : " + dto.getId()));
 
-        // Si la quantitÃ© cible ou le projet change, on valide
         BigDecimal newQuantite = dto.getQuantiteCible() != null ? dto.getQuantiteCible() : of.getQuantiteCible();
         UUID newProjectId = dto.getProjectId() != null ? dto.getProjectId() : (of.getProjet() != null ? of.getProjet().getId() : null);
 
@@ -221,11 +213,17 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             validateProjectQuantity(projet, newQuantite, of.getId());
         }
 
+        if (dto.getLotVracId() != null) {
+            dto.setTraceabilityLotId(resolveTraceabilityLotId(dto.getLotVracId()));
+        }
+
         return super.update(dto);
     }
 
     private void validateProjectQuantity(com.osm.conditioning.projet.entity.Projet projet, BigDecimal quantiteCible, UUID currentOfId) {
-        if (projet == null) return;
+        if (projet == null) {
+            return;
+        }
 
         double sumExisting = projet.getOrdresFabrication().stream()
                 .filter(o -> currentOfId == null || !o.getId().equals(currentOfId))
@@ -233,20 +231,22 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 .sum();
 
         if (sumExisting + quantiteCible.doubleValue() > projet.getQuantiteCible()) {
-            throw new RuntimeException("La quantitÃ© cumulÃ©e des OF dÃ©passe la quantitÃ© cible du projet (" + projet.getQuantiteCible() + ")");
+            throw new RuntimeException("La quantite cumulee des OF depasse la quantite cible du projet (" + projet.getQuantiteCible() + ")");
         }
     }
+
     @Transactional
     public OrdreFabricationDto demarrerOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouvÃ© avec l'id : " + id));
+                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
 
         if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE) {
-            throw new RuntimeException("Impossible de dÃ©marrer un OF avec le statut : " + of.getStatut());
+            throw new RuntimeException("Impossible de demarrer un OF avec le statut : " + of.getStatut());
         }
 
-        // VÃ©rification du stock avant de dÃ©marrer
         List<String> ruptures = new ArrayList<>();
+        boolean projectMode = of.getProjet() != null;
+
         for (LigneOF ligne : of.getLignes()) {
             UUID articleId = ligne.getArticleId();
             BigDecimal besoin = ligne.getQuantiteTheorique();
@@ -255,19 +255,20 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             try {
                 stock = clientInventaire.getStockByArticle(articleId);
             } catch (Exception e) {
-                throw new RuntimeException("Impossible de rÃ©cupÃ©rer le stock pour l'article : " + articleId, e);
+                throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + articleId, e);
             }
 
-            Integer quantiteDisponible = (stock != null && stock.getQuantiteActuelle() != null) ? stock.getQuantiteActuelle() : 0;
+            int quantiteDisponible = getStartableQuantity(stock, projectMode);
+            String stockLabel = projectMode ? "reserve" : "disponible";
 
             if (quantiteDisponible < besoin.intValue()) {
-                ruptures.add(String.format("Article %s : besoin = %d, disponible = %d",
-                        articleId, besoin.intValue(), quantiteDisponible));
+                ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
+                        articleId, besoin.intValue(), stockLabel, quantiteDisponible));
             }
         }
 
         if (!ruptures.isEmpty()) {
-            throw new RuntimeException("Stock insuffisant pour dÃ©marrer l'OF : " + String.join(" ; ", ruptures));
+            throw new RuntimeException("Stock insuffisant pour demarrer l'OF : " + String.join(" ; ", ruptures));
         }
 
         of.setDateDebutReelle(LocalDateTime.now());
@@ -278,10 +279,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional
     public OrdreFabricationDto mettreEnPause(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouvÃ© avec l'id : " + id));
+                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
 
-        if (of.getStatut() != StatutOF.EN_COURS ) {
-            throw new RuntimeException("Seul un OF en cours peut Ãªtre mis en pause");
+        if (of.getStatut() != StatutOF.EN_COURS) {
+            throw new RuntimeException("Seul un OF en cours peut etre mis en pause");
         }
 
         of.setStatut(StatutOF.EN_PAUSE);
@@ -291,13 +292,13 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional
     public OrdreFabricationDto reprendreOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouvÃ© avec l'id : " + id));
+                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
 
         if (of.getStatut() != StatutOF.EN_PAUSE) {
-            throw new RuntimeException("Seul un OF en pause peut Ãªtre repris");
+            throw new RuntimeException("Seul un OF en pause peut etre repris");
         }
         if (of.getQualityStatus() == QualityStatus.BLOCKED) {
-            throw new RuntimeException("Impossible de reprendre un OF bloquÃ© par la qualitÃ©");
+            throw new RuntimeException("Impossible de reprendre un OF bloque par la qualite");
         }
 
         of.setStatut(StatutOF.EN_COURS);
@@ -307,23 +308,24 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional
     public OrdreFabricationDto cloturerOF(UUID id) {
         OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouvÃ© avec l'id : " + id));
+                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
 
         if (of.getStatut() != StatutOF.EN_COURS && of.getStatut() != StatutOF.EN_PAUSE) {
-            throw new RuntimeException("Seul un OF en cours ou en pause peut Ãªtre clÃ´turÃ©");
+            throw new RuntimeException("Seul un OF en cours ou en pause peut etre cloture");
         }
         if (of.getQualityStatus() == QualityStatus.BLOCKED) {
-            throw new RuntimeException("Impossible de clÃ´turer un OF bloquÃ©. Veuillez d'abord rÃ©soudre les problÃ¨mes qualitÃ©.");
+            throw new RuntimeException("Impossible de cloturer un OF bloque. Veuillez d'abord resoudre les problemes qualite.");
         }
+
         for (LigneOF ligne : of.getLignes()) {
-            BigDecimal quantiteConsommee = (ligne.getQuantiteReelle() != null) ? ligne.getQuantiteReelle() : ligne.getQuantiteTheorique();
+            BigDecimal quantiteConsommee = ligne.getQuantiteReelle() != null ? ligne.getQuantiteReelle() : ligne.getQuantiteTheorique();
 
             if (quantiteConsommee != null && quantiteConsommee.compareTo(BigDecimal.ZERO) > 0) {
                 try {
                     Map<String, Object> payload = new HashMap<>();
                     payload.put("quantite", quantiteConsommee.intValue());
                     payload.put("motif", "Consommation OF " + of.getCode());
-                    
+
                     if (of.getProjet() != null) {
                         clientInventaire.consommerReservation(ligne.getArticleId(), payload);
                     } else {
@@ -334,6 +336,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 }
             }
         }
+
         of.setDateFinReelle(LocalDateTime.now());
         if (of.getDateDebutReelle() != null) {
             long duree = ChronoUnit.MINUTES.between(of.getDateDebutReelle(), of.getDateFinReelle());
@@ -344,16 +347,17 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         OrdreFabrication saved = ofRepository.save(of);
         return convertToDto(saved);
     }
+
     @Transactional
     public OrdreFabricationDto saisirProduction(UUID id, SaisieProductionDto dto) {
         OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouvÃ© avec l'id : " + id));
+                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
 
         if (of.getStatut() != StatutOF.EN_COURS) {
             throw new RuntimeException("La saisie de production n'est possible que pour un OF en cours");
         }
         if (of.getQualityStatus() == QualityStatus.BLOCKED) {
-            throw new RuntimeException("La saisie de production n'est possible pour  un OF bloquÃ© par la qualitÃ©");
+            throw new RuntimeException("La saisie de production n'est possible que pour un OF non bloque par la qualite");
         }
         if (dto.getQuantiteNC() != null && dto.getQuantiteNC().compareTo(BigDecimal.ZERO) > 0) {
             if (dto.getMotifNC() == null || dto.getMotifNC().trim().isEmpty()) {
@@ -378,17 +382,57 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional
     public OrdreFabricationDto ajusterConsommation(UUID id, AjustementConsommationDto ajustement) {
         OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouvÃ© avec l'id : " + id));
+                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+
+        if (of.getStatut() != StatutOF.EN_COURS && of.getStatut() != StatutOF.EN_PAUSE) {
+            throw new RuntimeException("Les ajustements de consommation sont autorises uniquement pour un OF en cours ou en pause");
+        }
+        if (ajustement.getQuantiteReelle() == null || ajustement.getQuantiteReelle().compareTo(BigDecimal.ZERO) < 0) {
+            throw new RuntimeException("La quantite reelle doit etre positive ou nulle");
+        }
 
         LigneOF ligne = of.getLignes().stream()
                 .filter(l -> l.getArticleId().equals(ajustement.getArticleId()))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("Article non trouvÃ© dans l'OF : " + ajustement.getArticleId()));
+                .orElseThrow(() -> new RuntimeException("Article non trouve dans l'OF : " + ajustement.getArticleId()));
+
+        StockSecDto stock;
+        try {
+            stock = clientInventaire.getStockByArticle(ajustement.getArticleId());
+        } catch (Exception e) {
+            throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + ajustement.getArticleId(), e);
+        }
+
+        int quantiteDemandee = ajustement.getQuantiteReelle().intValue();
+        if (of.getProjet() != null) {
+            int quantiteReserved = stock != null && stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+            if (quantiteDemandee > quantiteReserved) {
+                throw new RuntimeException("La quantite ajustee depasse le stock reserve disponible pour cet article");
+            }
+        } else {
+            int quantiteDisponible = stock != null && stock.getQuantiteDisponible() != null ? stock.getQuantiteDisponible() : 0;
+            if (quantiteDemandee > quantiteDisponible) {
+                throw new RuntimeException("La quantite ajustee depasse le stock disponible pour cet article");
+            }
+        }
 
         ligne.setQuantiteReelle(ajustement.getQuantiteReelle());
         ligne.setMotifAjustement(ajustement.getMotif());
 
         return convertToDto(ofRepository.save(of));
+    }
+
+    private int getStartableQuantity(StockSecDto stock, boolean projectMode) {
+        if (stock == null) {
+            return 0;
+        }
+        if (projectMode) {
+            return stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+        }
+        if (stock.getQuantiteDisponible() != null) {
+            return stock.getQuantiteDisponible();
+        }
+        return stock.getQuantiteActuelle() != null ? stock.getQuantiteActuelle() : 0;
     }
 
     private OrdreFabricationDto convertToDto(OrdreFabrication of) {
@@ -426,6 +470,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         dto.setPublicCode(of.getQrHex());
         dto.setQrUrl(getQrUrlForPublicCode(of.getQrHex()));
         dto.setQrImageBase64(of.getQrImageBase64());
+        dto.setTraceabilityLotId(of.getTraceabilityLotId());
 
         if (of.getProjet() != null) {
             dto.setProjectId(of.getProjet().getId());
@@ -433,6 +478,41 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
 
         return dto;
+    }
+
+    private void ensureTraceabilityLotId(OrdreFabrication of) {
+        if (of == null || of.getTraceabilityLotId() != null || of.getLotVracId() == null) {
+            return;
+        }
+
+        UUID resolved = resolveTraceabilityLotId(of.getLotVracId());
+        if (resolved != null && !resolved.equals(of.getTraceabilityLotId())) {
+            of.setTraceabilityLotId(resolved);
+            ofRepository.save(of);
+        }
+    }
+
+    private UUID resolveTraceabilityLotId(UUID lotVracId) {
+        try {
+            ApiResponse<StorageUnitDto> storageResponse = productionStorageClient.getStorageUnit(lotVracId);
+            if (storageResponse == null || !storageResponse.isSuccess() || storageResponse.getData() == null) {
+                throw new RuntimeException("Cuve d'huile introuvable (ID: " + lotVracId + ")");
+            }
+
+            ApiResponse<com.osm.conditioning.expedition.dto.GenealogyDto> genealogyResponse =
+                    productionStorageClient.getGenealogy(lotVracId);
+            if (genealogyResponse != null && genealogyResponse.isSuccess() && genealogyResponse.getData() != null
+                    && genealogyResponse.getData().getTraceabilityLotId() != null) {
+                return genealogyResponse.getData().getTraceabilityLotId();
+            }
+
+            return lotVracId;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Erreur validation lot vrac {}: {}", lotVracId, e.getMessage());
+            throw new RuntimeException("Impossible de valider le lot vrac selectionne", e);
+        }
     }
 
     private String generateCode() {
@@ -459,7 +539,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Transactional(readOnly = true)
     public QrResolveResponse resolve(String publicCode) {
         OrdreFabrication entity = ofRepository.findByQrHex(publicCode)
-                .orElseThrow(() -> new EntityNotFoundException("OF non trouvÃ© pour le code : " + publicCode));
+                .orElseThrow(() -> new EntityNotFoundException("OF non trouve pour le code : " + publicCode));
 
         QrResolveResponse response = new QrResolveResponse();
         response.setEntityType("OF");

@@ -7,6 +7,9 @@ import java.util.UUID;
 
 @Data
 public class GenealogyDto {
+    private UUID traceabilityLotId;
+    private String traceabilitySourceType;
+    private UUID rootReceptionId;
     private UUID storageUnitId;
     private String lotNumber;
     private String storageUnitName;

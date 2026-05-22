@@ -53,6 +53,9 @@ public class OrdreFabrication extends BaseEntity implements Serializable {
     @Column(name = "lot_vrac_id")
     private UUID lotVracId;
 
+    @Column(name = "traceability_lot_id")
+    private UUID traceabilityLotId;
+
     private String motifNC;
 
     @OneToMany(mappedBy = "of", cascade = CascadeType.ALL, orphanRemoval = true)

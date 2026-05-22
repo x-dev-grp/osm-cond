@@ -73,6 +73,7 @@ public class TraceabilityService {
         Map<UUID, Object> packagedLabelsByLot = new LinkedHashMap<>();
 
         for (OrdreFabrication of : ofs) {
+            ensureTraceabilityLotId(of);
             UUID ofId = of.getId();
             Map<String, Object> ofSnapshot = new LinkedHashMap<>();
             ofSnapshot.put("code", valueOrEmpty(of.getCode()));
@@ -88,24 +89,26 @@ public class TraceabilityService {
             }
 
             ofSnapshot.put("lotVracId", of.getLotVracId() != null ? of.getLotVracId().toString() : "");
+            ofSnapshot.put("traceabilityLotId", of.getTraceabilityLotId() != null ? of.getTraceabilityLotId().toString() : "");
             ofSnapshot.put("status", of.getStatut() != null ? of.getStatut().name() : "");
             ofSnapshot.put("qualityStatus", of.getQualityStatus() != null ? of.getQualityStatus().name() : "");
             ofSnapshot.put("quantityTarget", of.getQuantiteCible());
             ofSnapshot.put("quantityGood", of.getQuantiteBonne());
             ofDetails.put(ofId, ofSnapshot);
 
-            if (of.getLotVracId() == null) {
+            UUID genealogyAnchor = of.getTraceabilityLotId() != null ? of.getTraceabilityLotId() : of.getLotVracId();
+            if (genealogyAnchor == null) {
                 continue;
             }
 
             try {
-                ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(of.getLotVracId());
+                ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(genealogyAnchor);
                 if (response != null && response.isSuccess() && response.getData() != null) {
-                    oilGenealogy.put(of.getLotVracId(), response.getData());
-                    packagedLabelsByLot.put(of.getLotVracId(), labelSnapshotsForLot(of.getLotVracId()));
+                    oilGenealogy.put(genealogyAnchor, response.getData());
+                    packagedLabelsByLot.put(genealogyAnchor, labelSnapshotsForLot(of));
                 }
             } catch (Exception e) {
-                log.warn("Genealogie huile introuvable ou erreur pour le lot vrac {}", of.getLotVracId());
+                log.warn("Genealogie huile introuvable ou erreur pour l'ancre {}", genealogyAnchor);
             }
         }
 
@@ -146,10 +149,13 @@ public class TraceabilityService {
                     continue;
                 }
                 ofRepository.findById(line.getOfId()).ifPresent(of -> {
-                    if (Objects.equals(of.getProjet().getId(), expedition.getProjet().getId())) {
+                    UUID expeditionProjectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
+                    UUID ofProjectId = of.getProjet() != null ? of.getProjet().getId() : null;
+
+                    if (expeditionProjectId != null && Objects.equals(ofProjectId, expeditionProjectId)) {
                         ordered.put(of.getId(), of);
                     } else {
-                        log.warn("OF {} does not belong to project {}, skipping in traceability", of.getId(), expedition.getProjet().getId());
+                        log.warn("OF {} does not belong to project {}, skipping in traceability", of.getId(), expeditionProjectId);
                     }
                 });
             }
@@ -164,8 +170,23 @@ public class TraceabilityService {
         return new ArrayList<>(ordered.values());
     }
 
-    private List<Map<String, Object>> labelSnapshotsForLot(UUID lotId) {
-        return labelContentRepository.findAllByLotIdAndIsDeletedFalse(lotId).stream()
+    private List<Map<String, Object>> labelSnapshotsForLot(OrdreFabrication of) {
+        UUID traceabilityLotId = of.getTraceabilityLotId();
+        UUID lotId = of.getLotVracId();
+
+        List<LabelContent> labels = new ArrayList<>();
+        if (traceabilityLotId != null) {
+            labels.addAll(labelContentRepository.findAllByTraceabilityLotIdAndIsDeletedFalse(traceabilityLotId));
+        }
+        if (labels.isEmpty() && lotId != null) {
+            labels.addAll(labelContentRepository.findAllByLotIdAndIsDeletedFalse(lotId));
+        }
+        labels.forEach(this::ensureTraceabilityLotId);
+
+        return labels.stream()
+                .collect(Collectors.toMap(LabelContent::getId, label -> label, (left, right) -> left, LinkedHashMap::new))
+                .values()
+                .stream()
                 .sorted(Comparator.comparing(LabelContent::getPackagingDate, Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(this::labelSnapshot)
                 .collect(Collectors.toList());
@@ -178,6 +199,7 @@ public class TraceabilityService {
         data.put("status", label.getStatus() != null ? label.getStatus().name() : null);
         data.put("category", label.getLabelCategory() != null ? label.getLabelCategory().name() : null);
         data.put("lotId", label.getLotId());
+        data.put("traceabilityLotId", label.getTraceabilityLotId());
         data.put("lotNumber", label.getLotNumber());
         data.put("packagingId", label.getPackagingId());
         data.put("packagingDate", label.getPackagingDate());
@@ -204,5 +226,39 @@ public class TraceabilityService {
 
     private String valueOrEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private void ensureTraceabilityLotId(OrdreFabrication of) {
+        if (of == null || of.getTraceabilityLotId() != null || of.getLotVracId() == null) {
+            return;
+        }
+
+        try {
+            ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(of.getLotVracId());
+            if (response != null && response.isSuccess() && response.getData() != null
+                    && response.getData().getTraceabilityLotId() != null) {
+                of.setTraceabilityLotId(response.getData().getTraceabilityLotId());
+                ofRepository.save(of);
+            }
+        } catch (Exception e) {
+            log.warn("Impossible de retro-renseigner traceabilityLotId pour l'OF {}", of.getId());
+        }
+    }
+
+    private void ensureTraceabilityLotId(LabelContent label) {
+        if (label == null || label.getTraceabilityLotId() != null || label.getLotId() == null) {
+            return;
+        }
+
+        try {
+            ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(label.getLotId());
+            if (response != null && response.isSuccess() && response.getData() != null
+                    && response.getData().getTraceabilityLotId() != null) {
+                label.setTraceabilityLotId(response.getData().getTraceabilityLotId());
+                labelContentRepository.save(label);
+            }
+        } catch (Exception e) {
+            log.warn("Impossible de retro-renseigner traceabilityLotId pour l'etiquette {}", label.getId());
+        }
     }
 }

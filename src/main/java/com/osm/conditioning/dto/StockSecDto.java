@@ -15,5 +15,6 @@ public class StockSecDto {
     private UUID id;
     private UUID articleId;
     private Integer quantiteActuelle;
-    // getters / setters
+    private Integer quantiteReservee;
+    private Integer quantiteDisponible;
 }

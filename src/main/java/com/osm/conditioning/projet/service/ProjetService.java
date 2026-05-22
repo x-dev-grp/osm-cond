@@ -264,14 +264,8 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 .orElseThrow(() ->
                         new EntityNotFoundException("Projet non trouve : " + id));
 
+        releaseConfirmedReservations(projet);
         projet.setStatut(STATUT_ANNULE);
-
-        // Release reservations
-        if (projet.getReservations() != null) {
-            for (ProjetReservation res : projet.getReservations()) {
-                res.setStatut("RELEASED");
-            }
-        }
 
         Projet saved = projetRepository.save(projet);
 
@@ -285,6 +279,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 .orElseThrow(() ->
                         new EntityNotFoundException("Projet non trouve : " + id));
 
+        releaseConfirmedReservations(projet);
         projet.setDeleted(true);
 
         Projet saved = projetRepository.save(projet);
@@ -375,19 +370,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     private void calculateAndSetReservations(Projet projet) {
         // 1. Release previous reservations if they exist
-        if (projet.getReservations() != null && !projet.getReservations().isEmpty()) {
-            for (ProjetReservation oldRes : projet.getReservations()) {
-                if ("CONFIRMED".equals(oldRes.getStatut())) {
-                    try {
-                        Map<String, Object> payload = new HashMap<>();
-                        payload.put("quantite", oldRes.getQuantiteReservee().intValue());
-                        clientInventaire.annulerReservation(oldRes.getArticleId(), payload);
-                    } catch (Exception e) {
-                        System.err.println("Error releasing reservation for article: " + oldRes.getArticleId());
-                    }
-                }
-            }
-        }
+        releaseConfirmedReservations(projet);
 
         projet.getReservations().clear();
         if (projet.getProduits() == null || projet.getProduits().isEmpty()) {
@@ -431,6 +414,30 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             }
 
             projet.getReservations().add(pr);
+        }
+    }
+
+    private void releaseConfirmedReservations(Projet projet) {
+        if (projet.getReservations() == null || projet.getReservations().isEmpty()) {
+            return;
+        }
+
+        for (ProjetReservation reservation : projet.getReservations()) {
+            if (!"CONFIRMED".equals(reservation.getStatut())) {
+                continue;
+            }
+
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("quantite", reservation.getQuantiteReservee().intValue());
+                clientInventaire.annulerReservation(reservation.getArticleId(), payload);
+                reservation.setStatut("RELEASED");
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Impossible de liberer la reservation pour l'article " + reservation.getArticleId(),
+                        e
+                );
+            }
         }
     }
 

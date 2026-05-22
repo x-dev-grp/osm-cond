@@ -253,7 +253,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
             StockSecDto stock;
             try {
-                stock = clientInventaire.getStockByArticle(articleId);
+                stock = getOrCreateStockForArticle(articleId);
             } catch (Exception e) {
                 throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + articleId, e);
             }
@@ -398,7 +398,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         StockSecDto stock;
         try {
-            stock = clientInventaire.getStockByArticle(ajustement.getArticleId());
+            stock = getOrCreateStockForArticle(ajustement.getArticleId());
         } catch (Exception e) {
             throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + ajustement.getArticleId(), e);
         }
@@ -433,6 +433,22 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             return stock.getQuantiteDisponible();
         }
         return stock.getQuantiteActuelle() != null ? stock.getQuantiteActuelle() : 0;
+    }
+
+    private StockSecDto getOrCreateStockForArticle(UUID articleId) {
+        try {
+            return clientInventaire.getStockByArticle(articleId);
+        } catch (Exception firstError) {
+            try {
+                clientInventaire.createStockForArticle(articleId);
+                return clientInventaire.getStockByArticle(articleId);
+            } catch (Exception secondError) {
+                throw new RuntimeException(
+                        "Impossible de recuperer ou creer le stock pour l'article : " + articleId,
+                        secondError
+                );
+            }
+        }
     }
 
     private OrdreFabricationDto convertToDto(OrdreFabrication of) {

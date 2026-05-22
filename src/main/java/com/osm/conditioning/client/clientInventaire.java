@@ -4,6 +4,7 @@ import com.osm.conditioning.dto.*;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
@@ -27,6 +28,9 @@ public interface clientInventaire {
 
     @GetMapping("/api/inventaire/stocks/article/{articleId}")
     StockSecDto getStockByArticle(@PathVariable("articleId") UUID articleId);
+
+    @PostMapping("/api/inventaire/stocks/article/{articleId}")
+    StockSecDto createStockForArticle(@PathVariable("articleId") UUID articleId);
 
     @PutMapping("/api/inventaire/stocks/{articleId}/sortie")
     StockSecDto sortieStock(@PathVariable("articleId") UUID articleId,

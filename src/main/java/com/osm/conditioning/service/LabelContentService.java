@@ -147,6 +147,7 @@ public class LabelContentService {
 
         prepareLabelContent(labelContent, storageUnit, packaging, companyProfile);
         applyReusableDefaultsFromExistingLabel(labelContent, latestProductLabel);
+        applyCompanyIdentity(labelContent, companyProfile);
 
         applyRequestQualityAndVariety(
                 labelContent,
@@ -340,6 +341,21 @@ public class LabelContentService {
         labelContent.setClaimTypes(new LinkedHashSet<>());
         labelContent.setMarketingClaims(new ArrayList<>());
         labelContent.setCertifications(new ArrayList<>());
+    }
+
+    private void applyCompanyIdentity(LabelContent labelContent, CompanyProfileDto companyProfile) {
+        if (labelContent == null || companyProfile == null) {
+            return;
+        }
+
+        labelContent.setResponsibleName(clean(companyProfile.getLegalName()));
+        labelContent.setResponsibleAddress(joinNonBlank(
+                companyProfile.getAddressLine1(),
+                companyProfile.getPostalCode(),
+                companyProfile.getCity(),
+                companyProfile.getGovernorate(),
+                DEFAULT_ORIGIN_COUNTRY
+        ));
     }
 
     private void applyReusableDefaultsFromExistingLabel(LabelContent target, LabelContent source) {
@@ -833,6 +849,7 @@ public class LabelContentService {
         payload.put("qualityGrade", labelContent.getQualityGrade());
         payload.put("extractionMethod", labelContent.getExtractionMethod());
         payload.put("sensoryProfile", labelContent.getSensoryProfile());
+        payload.put("postFiltrationQualityControls", resolvePostFiltrationQualityControls(labelContent));
 
         // Merge certifications and marketing claims for the label display
         Set<String> allCerts = new LinkedHashSet<>();
@@ -866,6 +883,71 @@ public class LabelContentService {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Impossible de serialiser l'etiquette en JSON", e);
         }
+    }
+
+    private Map<String, String> resolvePostFiltrationQualityControls(LabelContent labelContent) {
+        if (labelContent == null || labelContent.getSourceSnapshots() == null) {
+            return Map.of();
+        }
+
+        for (LabelSource snapshot : labelContent.getSourceSnapshots()) {
+            if (snapshot == null
+                    || snapshot.getSourceType() != LabelSourceType.FILTERED_LOT
+                    || isBlank(snapshot.getSnapshotJson())) {
+                continue;
+            }
+
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parsed = objectMapper.readValue(snapshot.getSnapshotJson(), Map.class);
+
+                Map<String, String> direct = toStringMap(parsed.get("filteredQualityControls"));
+                if (!direct.isEmpty()) {
+                    return direct;
+                }
+
+                Object genealogyObj = parsed.get("genealogy");
+                if (genealogyObj instanceof Map<?, ?> genealogyMap) {
+                    Map<String, String> fromGenealogy = toStringMap(genealogyMap.get("filteredQualityControls"));
+                    if (!fromGenealogy.isEmpty()) {
+                        return fromGenealogy;
+                    }
+
+                    Object filtrationsObj = genealogyMap.get("filtrations");
+                    if (filtrationsObj instanceof List<?> filtrations) {
+                        for (Object filtrationObj : filtrations) {
+                            if (filtrationObj instanceof Map<?, ?> filtrationMap) {
+                                Map<String, String> controls = toStringMap(filtrationMap.get("qualityControls"));
+                                if (!controls.isEmpty()) {
+                                    return controls;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // Non-blocking: keep export resilient if snapshot format differs.
+            }
+        }
+
+        return Map.of();
+    }
+
+    private Map<String, String> toStringMap(Object source) {
+        if (!(source instanceof Map<?, ?> sourceMap) || sourceMap.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
+            String key = entry.getKey() == null ? null : String.valueOf(entry.getKey()).trim();
+            String value = entry.getValue() == null ? null : String.valueOf(entry.getValue()).trim();
+            if (key != null && !key.isEmpty() && value != null && !value.isEmpty()) {
+                result.put(key, value);
+            }
+        }
+
+        return result;
     }
 
     private void defaultLegalDenomination(LabelContent labelContent) {

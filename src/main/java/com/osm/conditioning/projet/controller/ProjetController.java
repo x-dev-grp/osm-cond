@@ -6,6 +6,7 @@ import com.osm.conditioning.projet.service.ProjetService;
 import com.xdev.xdevbase.apiDTOs.ApiResponse;
 import com.xdev.xdevbase.apiDTOs.ApiSingleResponse;
 import com.xdev.xdevbase.controllers.impl.BaseControllerImpl;
+import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.services.BaseService;
 import jakarta.persistence.EntityNotFoundException;
@@ -17,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -274,5 +276,26 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
     @Override
     protected String getResourceName() {
         return "PROJET";
+    }
+
+    /**
+     * Avoid ModelMapper ProjetDto -> Projet mapping: nested client.id and clientId both target setClient().
+     */
+    @Override
+    protected ProjetDto attachPermittedActions(ProjetDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        Set<Action> actions = projetService.actionsMapping(new Projet());
+        return attachPermittedActions(dto, getResourceName(), actions);
+    }
+
+    @Override
+    protected List<ProjetDto> attachPermittedActions(List<ProjetDto> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return dtos;
+        }
+        Set<Action> actions = projetService.actionsMapping(new Projet());
+        return attachPermittedActions(dtos, getResourceName(), actions);
     }
 }

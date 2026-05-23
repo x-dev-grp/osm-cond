@@ -139,6 +139,16 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             throw new RuntimeException("Le produit est obligatoire (non defini dans l'OF ni dans le projet)");
         }
         if (dto.getBomId() == null) {
+            try {
+                BOMDto activeBom = clientInventaire.getActiveBomForProduct(dto.getProductId());
+                if (activeBom != null && activeBom.getId() != null) {
+                    dto.setBomId(activeBom.getId());
+                }
+            } catch (Exception ignored) {
+                // handled below if still null
+            }
+        }
+        if (dto.getBomId() == null) {
             throw new RuntimeException("La BOM est obligatoire (non definie dans l'OF ni dans le projet)");
         }
 
@@ -258,25 +268,23 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
 
         List<String> ruptures = new ArrayList<>();
-        if (!projectMode) {
-            for (LigneOF ligne : of.getLignes()) {
-                UUID articleId = ligne.getArticleId();
-                BigDecimal besoin = ligne.getQuantiteTheorique();
+        for (LigneOF ligne : of.getLignes()) {
+            UUID articleId = ligne.getArticleId();
+            int besoin = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
 
-                StockSecDto stock;
-                try {
-                    stock = getOrCreateStockForArticle(articleId);
-                } catch (Exception e) {
-                    throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + articleId, e);
-                }
+            StockSecDto stock;
+            try {
+                stock = getOrCreateStockForArticle(articleId);
+            } catch (Exception e) {
+                throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + resolveArticleLabel(articleId), e);
+            }
 
-                int quantiteDisponible = getStartableQuantity(stock, false);
-                String stockLabel = "disponible";
+            int quantiteDisponible = getStartableQuantity(stock, projectMode);
+            String stockLabel = projectMode ? "reserve" : "disponible";
 
-                if (quantiteDisponible < besoin.intValue()) {
-                    ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
-                            articleId, besoin.intValue(), stockLabel, quantiteDisponible));
-                }
+            if (quantiteDisponible < besoin) {
+                ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
+                        resolveArticleLabel(articleId), besoin, stockLabel, quantiteDisponible));
             }
         }
 
@@ -341,8 +349,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             if (quantiteConsommee != null && quantiteConsommee.compareTo(BigDecimal.ZERO) > 0) {
                 try {
                     Map<String, Object> payload = new HashMap<>();
-                    payload.put("quantite", quantiteConsommee.intValue());
+                    payload.put("quantite", com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee));
                     payload.put("motif", "Consommation OF " + of.getCode());
+                    payload.put("referenceType", "OF");
+                    payload.put("referenceId", of.getId() != null ? of.getId().toString() : null);
 
                     if (of.getProjet() != null) {
                         clientInventaire.consommerReservation(ligne.getArticleId(), payload);
@@ -465,6 +475,21 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         ligne.setMotifAjustement(ajustement.getMotif());
 
         return convertToDto(ofRepository.save(of));
+    }
+
+    private String resolveArticleLabel(UUID articleId) {
+        if (articleId == null) {
+            return "inconnu";
+        }
+        try {
+            ArticleSecDto article = clientInventaire.getArticleById(articleId);
+            if (article != null && article.getNom() != null && !article.getNom().isBlank()) {
+                return article.getNom();
+            }
+        } catch (Exception ignored) {
+            // fallback to id
+        }
+        return articleId.toString();
     }
 
     private int getStartableQuantity(StockSecDto stock, boolean projectMode) {

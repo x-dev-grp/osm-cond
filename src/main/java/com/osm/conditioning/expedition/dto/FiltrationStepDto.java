@@ -15,4 +15,5 @@ public class FiltrationStepDto {
     private UUID sourceStorageUnitId;
     private String sourceStorageUnitName;
     private Map<String, String> qualityControls;
+    private java.util.List<IntakeStepDto> sourceIntakeChain = new java.util.ArrayList<>();
 }

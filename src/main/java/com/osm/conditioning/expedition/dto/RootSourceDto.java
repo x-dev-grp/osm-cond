@@ -12,4 +12,5 @@ public class RootSourceDto {
     private String supplierName;
     private String date;
     private Map<String, Object> extra;
+    private Map<String, String> qualityControls;
 }

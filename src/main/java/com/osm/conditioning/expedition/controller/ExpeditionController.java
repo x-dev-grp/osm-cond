@@ -77,6 +77,10 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
         return ResponseEntity.ok(expeditionService.getProjectTraceability(projectId));
     }
 
+    @GetMapping("/{id}/traceability")
+    public ResponseEntity<Map<String, Object>> getExpeditionTraceability(@PathVariable UUID id) {
+        return ResponseEntity.ok(expeditionService.getExpeditionTraceability(id));
+    }
 
     @GetMapping("/{id}")
     public ResponseEntity<ExpeditionDto> getById(@PathVariable UUID id) {
@@ -125,11 +129,20 @@ public class ExpeditionController extends BaseControllerImpl<Expedition, Expedit
     }
 
     @PostMapping("/{id}/validate")
-    public ResponseEntity<ExpeditionDto> validate(
+    public ResponseEntity<?> validate(
             @PathVariable UUID id,
             @RequestBody(required = false) ExpeditionActionRequest request
     ) {
-        return ResponseEntity.ok(attachPermittedActions(expeditionService.validate(id, request)));
+        try {
+            return ResponseEntity.ok(attachPermittedActions(expeditionService.validate(id, request)));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of(
+                            "success", false,
+                            "message", e.getMessage(),
+                            "error", e.getMessage()
+                    ));
+        }
     }
 
     @PostMapping("/{id}/ship")

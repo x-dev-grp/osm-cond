@@ -26,6 +26,9 @@ public interface clientInventaire {
     @GetMapping("/api/inventaire/boms/{id}")
     BOMDto getBomById(@PathVariable("id") UUID id);
 
+    @GetMapping("/api/inventaire/boms/product/{productId}/active")
+    BOMDto getActiveBomForProduct(@PathVariable("productId") UUID productId);
+
     @GetMapping("/api/inventaire/stocks/article/{articleId}")
     StockSecDto getStockByArticle(@PathVariable("articleId") UUID articleId);
 

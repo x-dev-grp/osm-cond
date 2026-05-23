@@ -283,11 +283,13 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             throw new IllegalStateException("La validation exige une expedition READY");
         }
 
+        traceabilityService.assertTraceabilityComplete(expedition);
+
         expedition.setStatus(ExpeditionStatus.VALIDATED);
         expedition.setValidatedAt(LocalDateTime.now());
         appendActionComment(expedition, "VALIDATED", request);
 
-        // Capture irreversible traceability snapshot
+        // Capture irreversible traceability snapshot (expedition lines only)
         traceabilityService.captureTraceabilitySnapshot(expedition);
 
         Expedition saved = expeditionRepository.save(expedition);
@@ -364,6 +366,12 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     @Transactional(readOnly = true)
     public Map<String, Object> getProjectTraceability(UUID projectId) {
         return traceabilityService.getLiveProjectTraceability(projectId);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getExpeditionTraceability(UUID expeditionId)   {
+        Expedition expedition = findExpedition(expeditionId);
+        return traceabilityService.getExpeditionTraceability(expedition);
     }
 
     /* ──────────────────────── QR / RESOLVE ──────────────────────── */

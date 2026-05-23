@@ -7,6 +7,7 @@ import com.osm.conditioning.dto.ProduitFinalDto;
 import com.osm.conditioning.expedition.dto.GenealogyDto;
 import com.osm.conditioning.expedition.model.Expedition;
 import com.osm.conditioning.expedition.model.ExpeditionArticle;
+import com.osm.conditioning.expedition.repository.ExpeditionRepository;
 import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.repository.LabelContentRepository;
@@ -16,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -36,24 +39,133 @@ public class TraceabilityService {
     private final clientInventaire inventaireClient;
     private final OrdreFabricationRepository ofRepository;
     private final LabelContentRepository labelContentRepository;
+    private final ExpeditionRepository expeditionRepository;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public Map<String, Object> getLiveProjectTraceability(UUID projectId) {
         try {
             List<OrdreFabrication> ofs = ofRepository.findAllByProjetIdAndIsDeletedFalse(projectId);
-            return buildTraceabilityMap(ofs, null);
+            return buildTraceabilityMap(projectId, ofs, null);
         } catch (Exception e) {
             log.error("Failed to get live project traceability", e);
-            throw new IllegalStateException("Impossible de charger la traÃ§abilitÃ© en direct du projet", e);
+            throw new IllegalStateException("Impossible de charger la traçabilité en direct du projet", e);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getExpeditionTraceability(Expedition expedition) {
+        UUID projectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
+        List<OrdreFabrication> ofs = resolveExpeditionOfs(expedition);
+
+        if (expedition.getTraceabilitySnapshotJson() != null
+                && !expedition.getTraceabilitySnapshotJson().isBlank()) {
+            try {
+                Map<String, Object> snapshot = objectMapper.readValue(
+                        expedition.getTraceabilitySnapshotJson(),
+                        new TypeReference<LinkedHashMap<String, Object>>() {});
+                refreshRuntimeEventChains(snapshot, projectId, ofs, expedition);
+                return snapshot;
+            } catch (Exception e) {
+                log.warn("Snapshot JSON invalide pour expedition {}, reconstruction live", expedition.getId());
+            }
+        }
+        return buildTraceabilityMap(projectId, ofs, expedition);
+    }
+
+    private void refreshRuntimeEventChains(
+            Map<String, Object> snapshot,
+            UUID projectId,
+            List<OrdreFabrication> ofs,
+            Expedition expedition) {
+        Map<String, GenealogyDto> genealogyByAnchor = readGenealogyMap(snapshot.get("oilGenealogy"));
+        Map<String, List<Map<String, Object>>> labelsByAnchor = readLabelsMap(snapshot.get("packagedLabelsByLot"));
+        List<Expedition> expeditions = projectId != null
+                ? expeditionRepository.findAllByProjetIdAndIsDeletedFalseOrderByCreatedDateDesc(projectId)
+                : List.of();
+
+        snapshot.put("eventChains", TraceabilityEventTreeBuilder.buildChains(
+                projectId, ofs, genealogyByAnchor, labelsByAnchor, expeditions));
+        snapshot.put("live", false);
+        if (projectId != null) {
+            snapshot.put("projectId", projectId.toString());
+        }
+        if (expedition != null && !snapshot.containsKey("expedition")) {
+            snapshot.put("expedition", expeditionSnapshot(expedition));
+        }
+    }
+
+    private Map<String, GenealogyDto> readGenealogyMap(Object raw) {
+        Map<String, GenealogyDto> result = new LinkedHashMap<>();
+        if (!(raw instanceof Map<?, ?> map)) {
+            return result;
+        }
+        map.forEach((key, value) -> result.put(
+                key.toString(),
+                objectMapper.convertValue(value, GenealogyDto.class)));
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, List<Map<String, Object>>> readLabelsMap(Object raw) {
+        Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
+        if (!(raw instanceof Map<?, ?> map)) {
+            return result;
+        }
+        map.forEach((key, value) -> {
+            if (value instanceof List<?> list) {
+                List<Map<String, Object>> labels = list.stream()
+                        .map(item -> objectMapper.convertValue(item, new TypeReference<Map<String, Object>>() {}))
+                        .collect(Collectors.toList());
+                result.put(key.toString(), labels);
+            }
+        });
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public void assertTraceabilityComplete(Expedition expedition) {
+        List<OrdreFabrication> ofs = resolveExpeditionOfs(expedition);
+        if (ofs.isEmpty()) {
+            throw new IllegalStateException(
+                    "Impossible de valider l'expedition : ajoutez au moins une ligne liee a un ordre de fabrication");
+        }
+
+        List<String> issues = new ArrayList<>();
+        for (OrdreFabrication of : ofs) {
+            ensureTraceabilityLotId(of);
+            UUID anchor = of.getTraceabilityLotId() != null ? of.getTraceabilityLotId() : of.getLotVracId();
+            if (anchor == null) {
+                issues.add("OF " + valueOrEmpty(of.getCode()) + " : aucun lot vrac ou lot de tracabilite");
+                continue;
+            }
+
+            try {
+                ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(anchor);
+                if (response == null || !response.isSuccess() || response.getData() == null) {
+                    issues.add("OF " + valueOrEmpty(of.getCode()) + " : genealogie huile introuvable");
+                    continue;
+                }
+                GenealogyDto genealogy = response.getData();
+                if (genealogy.getRootSources() == null || genealogy.getRootSources().isEmpty()) {
+                    issues.add("OF " + valueOrEmpty(of.getCode()) + " : origine reception ou trituration manquante");
+                }
+            } catch (Exception e) {
+                issues.add("OF " + valueOrEmpty(of.getCode()) + " : erreur lors du chargement de la genealogie");
+            }
+        }
+
+        if (!issues.isEmpty()) {
+            throw new IllegalStateException("Tracabilite incomplete : " + String.join(" ; ", issues));
         }
     }
 
     @Transactional
     public String captureTraceabilitySnapshot(Expedition expedition) {
         try {
-            List<OrdreFabrication> ofs = resolveProjectOfs(expedition);
-            Map<String, Object> snapshot = buildTraceabilityMap(ofs, expedition);
+            List<OrdreFabrication> ofs = resolveExpeditionOfs(expedition);
+            UUID projectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
+            Map<String, Object> snapshot = buildTraceabilityMap(projectId, ofs, expedition);
             
             String json = objectMapper.writeValueAsString(snapshot);
             expedition.setTraceabilitySnapshotJson(json);
@@ -66,11 +178,11 @@ public class TraceabilityService {
         }
     }
 
-    private Map<String, Object> buildTraceabilityMap(List<OrdreFabrication> ofs, Expedition expedition) throws Exception {
+    private Map<String, Object> buildTraceabilityMap(UUID projectId, List<OrdreFabrication> ofs, Expedition expedition) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
-        Map<UUID, Object> oilGenealogy = new LinkedHashMap<>();
-        Map<UUID, Object> ofDetails = new LinkedHashMap<>();
-        Map<UUID, Object> packagedLabelsByLot = new LinkedHashMap<>();
+        Map<String, GenealogyDto> oilGenealogy = new LinkedHashMap<>();
+        Map<String, Object> ofDetails = new LinkedHashMap<>();
+        Map<String, List<Map<String, Object>>> packagedLabelsByLot = new LinkedHashMap<>();
 
         for (OrdreFabrication of : ofs) {
             ensureTraceabilityLotId(of);
@@ -94,33 +206,44 @@ public class TraceabilityService {
             ofSnapshot.put("qualityStatus", of.getQualityStatus() != null ? of.getQualityStatus().name() : "");
             ofSnapshot.put("quantityTarget", of.getQuantiteCible());
             ofSnapshot.put("quantityGood", of.getQuantiteBonne());
-            ofDetails.put(ofId, ofSnapshot);
+            ofDetails.put(ofId.toString(), ofSnapshot);
 
             UUID genealogyAnchor = of.getTraceabilityLotId() != null ? of.getTraceabilityLotId() : of.getLotVracId();
             if (genealogyAnchor == null) {
                 continue;
             }
 
+            String anchorKey = genealogyAnchor.toString();
             try {
                 ApiResponse<GenealogyDto> response = productionStorageClient.getGenealogy(genealogyAnchor);
                 if (response != null && response.isSuccess() && response.getData() != null) {
-                    oilGenealogy.put(genealogyAnchor, response.getData());
-                    packagedLabelsByLot.put(genealogyAnchor, labelSnapshotsForLot(of));
+                    oilGenealogy.put(anchorKey, response.getData());
+                    packagedLabelsByLot.put(anchorKey, labelSnapshotsForLot(of));
                 }
             } catch (Exception e) {
                 log.warn("Genealogie huile introuvable ou erreur pour l'ancre {}", genealogyAnchor);
             }
         }
 
+        List<Expedition> projectExpeditions = projectId != null
+                ? expeditionRepository.findAllByProjetIdAndIsDeletedFalseOrderByCreatedDateDesc(projectId)
+                : List.of();
+
+        if (projectId != null) {
+            snapshot.put("projectId", projectId.toString());
+        }
         if (expedition != null) {
             snapshot.put("expedition", expeditionSnapshot(expedition));
         }
-        
+
         snapshot.put("ofDetails", ofDetails);
         snapshot.put("oilGenealogy", oilGenealogy);
         snapshot.put("packagedLabelsByLot", packagedLabelsByLot);
+        snapshot.put("eventChains", TraceabilityEventTreeBuilder.buildChains(
+                projectId, ofs, oilGenealogy, packagedLabelsByLot, projectExpeditions));
         snapshot.put("capturedAt", java.time.LocalDateTime.now().toString());
-        
+        snapshot.put("live", expedition == null || expedition.getTraceabilitySnapshotJson() == null);
+
         return snapshot;
     }
 
@@ -130,6 +253,9 @@ public class TraceabilityService {
         data.put("expeditionNumber", expedition.getExpeditionNumber());
         data.put("projectId", expedition.getProjet() != null ? expedition.getProjet().getId() : null);
         data.put("projectCode", expedition.getProjet() != null ? expedition.getProjet().getCode() : null);
+        if (expedition.getProjet() != null && expedition.getProjet().getClient() != null) {
+            data.put("clientName", expedition.getProjet().getClient().getNom());
+        }
         data.put("destination", expedition.getDestination());
         data.put("plannedShipDate", expedition.getPlannedShipDate());
         data.put("carrierName", expedition.getCarrierName());
@@ -140,31 +266,27 @@ public class TraceabilityService {
         return data;
     }
 
-    private List<OrdreFabrication> resolveProjectOfs(Expedition expedition) {
+    private List<OrdreFabrication> resolveExpeditionOfs(Expedition expedition) {
         Map<UUID, OrdreFabrication> ordered = new LinkedHashMap<>();
+        UUID expeditionProjectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
 
-        if (expedition.getLines() != null) {
-            for (ExpeditionArticle line : expedition.getLines()) {
-                if (line.getOfId() == null) {
-                    continue;
-                }
-                ofRepository.findById(line.getOfId()).ifPresent(of -> {
-                    UUID expeditionProjectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
-                    UUID ofProjectId = of.getProjet() != null ? of.getProjet().getId() : null;
-
-                    if (expeditionProjectId != null && Objects.equals(ofProjectId, expeditionProjectId)) {
-                        ordered.put(of.getId(), of);
-                    } else {
-                        log.warn("OF {} does not belong to project {}, skipping in traceability", of.getId(), expeditionProjectId);
-                    }
-                });
-            }
+        if (expedition.getLines() == null || expedition.getLines().isEmpty()) {
+            return List.of();
         }
 
-        if (expedition.getProjet() != null && expedition.getProjet().getId() != null) {
-            for (OrdreFabrication of : ofRepository.findAllByProjetIdAndIsDeletedFalse(expedition.getProjet().getId())) {
-                ordered.putIfAbsent(of.getId(), of);
+        for (ExpeditionArticle line : expedition.getLines()) {
+            if (line.getOfId() == null) {
+                continue;
             }
+            ofRepository.findById(line.getOfId()).ifPresent(of -> {
+                UUID ofProjectId = of.getProjet() != null ? of.getProjet().getId() : null;
+
+                if (expeditionProjectId != null && Objects.equals(ofProjectId, expeditionProjectId)) {
+                    ordered.put(of.getId(), of);
+                } else {
+                    log.warn("OF {} does not belong to project {}, skipping in traceability", of.getId(), expeditionProjectId);
+                }
+            });
         }
 
         return new ArrayList<>(ordered.values());

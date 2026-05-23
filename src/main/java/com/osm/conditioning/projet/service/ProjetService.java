@@ -405,19 +405,22 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             }
         }
 
+        Map<UUID, Integer> confirmedReservations = new LinkedHashMap<>();
         boolean hasFailure = false;
+
         for (Map.Entry<UUID, Double> entry : aggregatedNeeds.entrySet()) {
             ProjetReservation pr = new ProjetReservation();
             pr.setProjet(projet);
             pr.setArticleId(entry.getKey());
             pr.setQuantiteReservee(entry.getValue());
 
-            // Physical reservation in Inventory Service
+            int quantiteArrondie = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(entry.getValue());
             try {
                 Map<String, Object> payload = new HashMap<>();
-                payload.put("quantite", entry.getValue().intValue());
+                payload.put("quantite", quantiteArrondie);
                 clientInventaire.reserverStock(entry.getKey(), payload);
                 pr.setStatut("CONFIRMED");
+                confirmedReservations.put(entry.getKey(), quantiteArrondie);
             } catch (Exception e) {
                 System.err.println("Failed to reserve stock for article: " + entry.getKey() + " - " + e.getMessage());
                 pr.setStatut("FAILED");
@@ -428,7 +431,25 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         if (hasFailure) {
+            rollbackReservations(confirmedReservations);
+            for (ProjetReservation reservation : projet.getReservations()) {
+                if ("CONFIRMED".equals(reservation.getStatut())) {
+                    reservation.setStatut("RELEASED");
+                }
+            }
             projet.setStatut(STATUT_FAILED);
+        }
+    }
+
+    private void rollbackReservations(Map<UUID, Integer> confirmedReservations) {
+        for (Map.Entry<UUID, Integer> entry : confirmedReservations.entrySet()) {
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("quantite", entry.getValue());
+                clientInventaire.annulerReservation(entry.getKey(), payload);
+            } catch (Exception e) {
+                System.err.println("Rollback reservation failed for article " + entry.getKey() + ": " + e.getMessage());
+            }
         }
     }
 
@@ -444,7 +465,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
             try {
                 Map<String, Object> payload = new HashMap<>();
-                payload.put("quantite", reservation.getQuantiteReservee().intValue());
+                payload.put("quantite", com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(reservation.getQuantiteReservee()));
                 clientInventaire.annulerReservation(reservation.getArticleId(), payload);
                 reservation.setStatut("RELEASED");
             } catch (Exception e) {

@@ -17,4 +17,5 @@ public class GenealogyDto {
     private Map<String, String> filteredQualityControls;
     private List<FiltrationStepDto> filtrations = new ArrayList<>();
     private List<RootSourceDto> rootSources = new ArrayList<>();
+    private List<IntakeStepDto> intakeChain = new ArrayList<>();
 }

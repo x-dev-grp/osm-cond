@@ -494,7 +494,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         String lotNumber = normalizeNullable(request.getLotNumber());
         String unit = resolveUnit(request.getUnit());
 
-        OrdreFabrication of = null;
+        OrdreFabrication of;
         if (request.getOfId() != null) {
             of = assignOrValidateOfProject(request.getOfId(), expedition.getProjet());
             if (of.getStatut() != StatutOF.CLOTURE) {
@@ -526,6 +526,8 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
                         "Quantite expedition depasse la quantite conforme de l'OF (max " + maxShippable + ", deja allouee " + (alreadyAllocated + currentExpeditionQty) + ")"
                 );
             }
+        } else {
+            of = null;
         }
 
         UUID articleId = request.getArticleId();

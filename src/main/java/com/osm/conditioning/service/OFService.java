@@ -6,6 +6,8 @@ import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.dto.*;
 import com.osm.conditioning.model.LigneOF;
 import com.osm.conditioning.model.OrdreFabrication;
+import com.osm.conditioning.projet.entity.ProjetReservation;
+import com.osm.conditioning.projet.repository.ProjetRepository;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
 import com.xdev.communicator.models.shared.ApiResponse;
 import com.xdev.communicator.models.shared.StorageUnitDto;
@@ -32,6 +34,7 @@ import java.util.stream.Collectors;
 @Service
 @lombok.extern.slf4j.Slf4j
 public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricationDto, OrdreFabricationDto> {
+    private static final String STATUT_PROJET_EN_COURS = "EN_COURS";
 
     @Autowired
     private OrdreFabricationRepository ofRepository;
@@ -44,6 +47,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Autowired
     private com.osm.conditioning.projet.service.ProjetService projetService;
+
+    @Autowired
+    private ProjetRepository projetRepository;
 
     public OFService(BaseRepository<OrdreFabrication> repository,
                      CodeGenerator codeGenerator,
@@ -112,6 +118,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         com.osm.conditioning.projet.entity.Projet projet = null;
         if (dto.getProjectId() != null) {
             projet = projetService.findByIdOrThrow(dto.getProjectId());
+            projetService.ensureNotFailed(dto.getProjectId());
         }
 
         // Héritage des données du projet si non spécifiées dans le DTO
@@ -244,26 +251,32 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             throw new RuntimeException("Impossible de demarrer un OF avec le statut : " + of.getStatut());
         }
 
-        List<String> ruptures = new ArrayList<>();
         boolean projectMode = of.getProjet() != null;
 
-        for (LigneOF ligne : of.getLignes()) {
-            UUID articleId = ligne.getArticleId();
-            BigDecimal besoin = ligne.getQuantiteTheorique();
+        if (projectMode && of.getProjet() != null && of.getProjet().getId() != null) {
+            projetService.ensureNotFailed(of.getProjet().getId());
+        }
 
-            StockSecDto stock;
-            try {
-                stock = getOrCreateStockForArticle(articleId);
-            } catch (Exception e) {
-                throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + articleId, e);
-            }
+        List<String> ruptures = new ArrayList<>();
+        if (!projectMode) {
+            for (LigneOF ligne : of.getLignes()) {
+                UUID articleId = ligne.getArticleId();
+                BigDecimal besoin = ligne.getQuantiteTheorique();
 
-            int quantiteDisponible = getStartableQuantity(stock, projectMode);
-            String stockLabel = projectMode ? "reserve" : "disponible";
+                StockSecDto stock;
+                try {
+                    stock = getOrCreateStockForArticle(articleId);
+                } catch (Exception e) {
+                    throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + articleId, e);
+                }
 
-            if (quantiteDisponible < besoin.intValue()) {
-                ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
-                        articleId, besoin.intValue(), stockLabel, quantiteDisponible));
+                int quantiteDisponible = getStartableQuantity(stock, false);
+                String stockLabel = "disponible";
+
+                if (quantiteDisponible < besoin.intValue()) {
+                    ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
+                            articleId, besoin.intValue(), stockLabel, quantiteDisponible));
+                }
             }
         }
 
@@ -273,6 +286,11 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         of.setDateDebutReelle(LocalDateTime.now());
         of.setStatut(StatutOF.EN_COURS);
+
+        if (of.getProjet() != null && of.getProjet().getId() != null) {
+            projetService.updateStatus(of.getProjet().getId(), STATUT_PROJET_EN_COURS);
+        }
+
         return convertToDto(ofRepository.save(of));
     }
 
@@ -328,6 +346,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
                     if (of.getProjet() != null) {
                         clientInventaire.consommerReservation(ligne.getArticleId(), payload);
+                        decrementProjectReservation(of, ligne.getArticleId(), quantiteConsommee.doubleValue());
                     } else {
                         clientInventaire.sortieStock(ligne.getArticleId(), payload);
                     }
@@ -377,6 +396,32 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
 
         return convertToDto(ofRepository.save(of));
+    }
+
+    private void decrementProjectReservation(OrdreFabrication of, UUID articleId, double consumedQty) {
+        if (of == null || of.getProjet() == null || of.getProjet().getId() == null || consumedQty <= 0) {
+            return;
+        }
+
+        com.osm.conditioning.projet.entity.Projet projet = projetRepository.findByIdAndIsDeletedFalse(of.getProjet().getId())
+                .orElse(null);
+        if (projet == null || projet.getReservations() == null || projet.getReservations().isEmpty()) {
+            return;
+        }
+
+        for (ProjetReservation reservation : projet.getReservations()) {
+            if (reservation.getArticleId() == null || !reservation.getArticleId().equals(articleId)) {
+                continue;
+            }
+            double current = reservation.getQuantiteReservee() == null ? 0d : reservation.getQuantiteReservee();
+            double updated = Math.max(0d, current - consumedQty);
+            reservation.setQuantiteReservee(updated);
+            if (updated == 0d && "CONFIRMED".equalsIgnoreCase(reservation.getStatut())) {
+                reservation.setStatut("CONSUMED");
+            }
+            projetRepository.save(projet);
+            return;
+        }
     }
 
     @Transactional

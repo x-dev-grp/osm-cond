@@ -39,6 +39,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
     private static final String STATUT_BROUILLON = "BROUILLON";
     private static final String STATUT_ANNULE = "ANNULE";
+    private static final String STATUT_FAILED = "FAILED";
     private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
@@ -122,6 +123,14 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
         return toDto(projet);
+    }
+
+    @Transactional(readOnly = true)
+    public void ensureNotFailed(UUID id) {
+        Projet projet = findByIdOrThrow(id);
+        if (projet.getStatut() != null && STATUT_FAILED.equalsIgnoreCase(projet.getStatut().trim())) {
+            throw new IllegalStateException("Projet bloque: reservations de stock insuffisantes. Nouvelle verification requise.");
+        }
     }
 
     @Override
@@ -396,6 +405,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             }
         }
 
+        boolean hasFailure = false;
         for (Map.Entry<UUID, Double> entry : aggregatedNeeds.entrySet()) {
             ProjetReservation pr = new ProjetReservation();
             pr.setProjet(projet);
@@ -411,9 +421,14 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             } catch (Exception e) {
                 System.err.println("Failed to reserve stock for article: " + entry.getKey() + " - " + e.getMessage());
                 pr.setStatut("FAILED");
+                hasFailure = true;
             }
 
             projet.getReservations().add(pr);
+        }
+
+        if (hasFailure) {
+            projet.setStatut(STATUT_FAILED);
         }
     }
 

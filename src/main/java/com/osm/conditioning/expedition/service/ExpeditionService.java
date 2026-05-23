@@ -7,6 +7,7 @@ import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.osm.conditioning.client.clientInventaire;
+import com.osm.conditioning.Enum.StatutOF;
 import com.osm.conditioning.dto.ArticleSecDto;
 import com.osm.conditioning.dto.ProduitFinalDto;
 import com.osm.conditioning.dto.StockSecDto;
@@ -300,18 +301,6 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             throw new IllegalStateException("Le shipping exige une expedition VALIDATED");
         }
 
-        // Stock exit for each article line
-        for (ExpeditionArticle line : expedition.getLines()) {
-            if (line.getArticleId() == null) {
-                continue;
-            }
-
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("quantite", line.getQuantity());
-            payload.put("motif", "EXPEDITION " + expedition.getExpeditionNumber());
-            inventaireClient.sortieStock(line.getArticleId(), payload);
-        }
-
         expedition.setStatus(ExpeditionStatus.SHIPPED);
         expedition.setShippedAt(LocalDateTime.now());
         appendActionComment(expedition, "SHIPPED", request);
@@ -508,6 +497,9 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         OrdreFabrication of = null;
         if (request.getOfId() != null) {
             of = assignOrValidateOfProject(request.getOfId(), expedition.getProjet());
+            if (of.getStatut() != StatutOF.CLOTURE) {
+                throw new IllegalArgumentException("Seul un OF cloture peut etre expedie");
+            }
 
             if ((quantity == null || quantity <= 0) && of.getQuantiteBonne() != null && of.getQuantiteBonne().signum() > 0) {
                 quantity = of.getQuantiteBonne().intValue();
@@ -517,6 +509,22 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             }
             if (lotNumber == null && of.getLotVracId() != null) {
                 lotNumber = of.getLotVracId().toString();
+            }
+
+            int alreadyAllocated = sumAllocatedQuantityForOf(of.getId(), expedition.getId());
+            int currentExpeditionQty = expedition.getLines().stream()
+                    .filter(l -> l.getOfId() != null && l.getOfId().equals(of.getId()))
+                    .map(ExpeditionArticle::getQuantity)
+                    .filter(Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .sum();
+            int maxShippable = of.getQuantiteBonne() != null ? of.getQuantiteBonne().intValue() : 0;
+            int requested = quantity == null ? 0 : quantity;
+            int projected = alreadyAllocated + currentExpeditionQty + requested;
+            if (projected > maxShippable) {
+                throw new IllegalArgumentException(
+                        "Quantite expedition depasse la quantite conforme de l'OF (max " + maxShippable + ", deja allouee " + (alreadyAllocated + currentExpeditionQty) + ")"
+                );
             }
         }
 
@@ -589,6 +597,22 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     private Expedition findExpedition(UUID expeditionId) {
         return expeditionRepository.findByIdAndIsDeletedFalse(expeditionId)
                 .orElseThrow(() -> new EntityNotFoundException("Expedition introuvable : " + expeditionId));
+    }
+
+    private int sumAllocatedQuantityForOf(UUID ofId, UUID currentExpeditionId) {
+        if (ofId == null) {
+            return 0;
+        }
+
+        return expeditionRepository.findAllByIsDeletedFalseOrderByCreatedDateDesc().stream()
+                .filter(exp -> currentExpeditionId == null || !exp.getId().equals(currentExpeditionId))
+                .filter(exp -> exp.getStatus() != ExpeditionStatus.CANCELLED)
+                .flatMap(exp -> exp.getLines().stream())
+                .filter(line -> ofId.equals(line.getOfId()))
+                .map(ExpeditionArticle::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
     }
 
     private void ensureEditable(ExpeditionStatus status) {

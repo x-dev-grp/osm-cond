@@ -209,6 +209,55 @@ final class TraceabilityEventTreeBuilder {
         return events;
     }
 
+    /**
+     * Same rules as the event tree: origin is present if rootSources, rootReceptionId,
+     * or an intake step documents réception huile/olive or trituration.
+     */
+    static boolean hasDocumentedOilOrigin(GenealogyDto genealogy) {
+        if (genealogy == null) {
+            return false;
+        }
+        if (genealogy.getRootReceptionId() != null) {
+            return true;
+        }
+        if (genealogy.getRootSources() != null && !genealogy.getRootSources().isEmpty()) {
+            return true;
+        }
+        if (containsOriginIntake(genealogy.getIntakeChain())) {
+            return true;
+        }
+        if (genealogy.getFiltrations() != null) {
+            for (FiltrationStepDto step : genealogy.getFiltrations()) {
+                if (containsOriginIntake(step.getSourceIntakeChain())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsOriginIntake(List<IntakeStepDto> chain) {
+        if (chain == null || chain.isEmpty()) {
+            return false;
+        }
+        for (IntakeStepDto step : chain) {
+            if (isOriginIntakeType(step.getType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isOriginIntakeType(String type) {
+        if (type == null || type.isBlank()) {
+            return false;
+        }
+        return switch (type.toUpperCase()) {
+            case "OIL_RECEPTION", "OLIVE_RECEPTION", "RECEPTION", "TRITURATION" -> true;
+            default -> false;
+        };
+    }
+
     private static List<FiltrationStepDto> sortedFiltrations(List<FiltrationStepDto> filtrations) {
         List<FiltrationStepDto> sorted = new ArrayList<>(filtrations != null ? filtrations : List.of());
         sorted.sort(Comparator.comparing(

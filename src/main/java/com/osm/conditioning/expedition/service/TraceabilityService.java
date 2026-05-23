@@ -147,7 +147,7 @@ public class TraceabilityService {
                     continue;
                 }
                 GenealogyDto genealogy = response.getData();
-                if (genealogy.getRootSources() == null || genealogy.getRootSources().isEmpty()) {
+                if (!TraceabilityEventTreeBuilder.hasDocumentedOilOrigin(genealogy)) {
                     issues.add("OF " + valueOrEmpty(of.getCode()) + " : origine reception ou trituration manquante");
                 }
             } catch (Exception e) {

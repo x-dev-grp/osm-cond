@@ -86,7 +86,7 @@ logging:
     com.xdev: DEBUG
     org.springframework.security: DEBUG
     org.springframework.web: ${LOG_LEVEL_WEB:DEBUG}
-    org.hibernate.SQL: WARN
+    org.hibernate.SQL: debug
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
     feign: DEBUG
     com.netflix.discovery: ${LOG_LEVEL_EUREKA:WARN}

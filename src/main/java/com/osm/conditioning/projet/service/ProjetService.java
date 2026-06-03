@@ -1,8 +1,10 @@
 package com.osm.conditioning.projet.service;
 
 import com.osm.conditioning.client.clientInventaire;
+import com.osm.conditioning.dto.ArticleSecDto;
 import com.osm.conditioning.dto.BOMDto;
 import com.osm.conditioning.dto.BomLineDto;
+import com.osm.conditioning.dto.ProduitFinalDto;
 import com.osm.conditioning.projet.dto.ClientDto;
 import com.osm.conditioning.projet.dto.ProjetDto;
 import com.osm.conditioning.projet.dto.ProjetProduitDto;
@@ -125,9 +127,14 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         return toDto(projet);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public void ensureNotFailed(UUID id) {
         Projet projet = findByIdOrThrow(id);
+        if (projet.getStatut() != null && STATUT_FAILED.equalsIgnoreCase(projet.getStatut().trim())) {
+            calculateAndSetReservations(projet);
+            projet = projetRepository.save(projet);
+        }
+
         if (projet.getStatut() != null && STATUT_FAILED.equalsIgnoreCase(projet.getStatut().trim())) {
             throw new IllegalStateException("Projet bloque: reservations de stock insuffisantes. Nouvelle verification requise.");
         }
@@ -387,15 +394,19 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         Map<UUID, Double> aggregatedNeeds = new HashMap<>();
+        Map<UUID, ArticleSecDto> articleCache = new HashMap<>();
+        Map<UUID, ProduitFinalDto> productCache = new HashMap<>();
 
         for (ProjetProduit pp : projet.getProduits()) {
             if (pp.getBomId() != null) {
                 try {
                     BOMDto bom = clientInventaire.getBomById(pp.getBomId());
                     if (bom != null && bom.getLines() != null) {
+                        double productionQuantity = calculateReservationProductionQuantity(pp, projet.getUnite(), productCache);
                         for (BomLineDto line : bom.getLines()) {
                             UUID articleId = line.getArticleId();
-                            double needed = line.getQuantity() * pp.getQuantiteCible();
+                            ArticleSecDto article = getArticleForReservation(articleId, articleCache);
+                            double needed = calculateReservationNeed(line, productionQuantity, article, articleCache);
                             aggregatedNeeds.put(articleId, aggregatedNeeds.getOrDefault(articleId, 0.0) + needed);
                         }
                     }
@@ -438,7 +449,163 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 }
             }
             projet.setStatut(STATUT_FAILED);
+        } else if (projet.getStatut() == null || STATUT_FAILED.equalsIgnoreCase(projet.getStatut())) {
+            projet.setStatut(STATUT_BROUILLON);
         }
+    }
+
+    private double calculateReservationProductionQuantity(
+            ProjetProduit projetProduit,
+            String projectUnit,
+            Map<UUID, ProduitFinalDto> productCache
+    ) {
+        double targetQuantity = projetProduit.getQuantiteCible() != null ? projetProduit.getQuantiteCible() : 0.0;
+        if (targetQuantity <= 0) {
+            return 0.0;
+        }
+
+        if (isLiterUnit(projectUnit)) {
+            ProduitFinalDto product = getProductForReservation(projetProduit.getProductId(), productCache);
+            Float volumeMl = product != null ? product.getVolume() : null;
+
+            if (volumeMl != null && volumeMl > 0) {
+                return Math.ceil(targetQuantity / (volumeMl / 1000.0));
+            }
+        }
+
+        return Math.ceil(targetQuantity);
+    }
+
+    private boolean isLiterUnit(String unit) {
+        if (unit == null) {
+            return false;
+        }
+
+        String normalized = unit.trim().toUpperCase(Locale.ROOT);
+        return "L".equals(normalized) || "LITRE".equals(normalized) || "LITRES".equals(normalized);
+    }
+
+    private ProduitFinalDto getProductForReservation(UUID productId, Map<UUID, ProduitFinalDto> productCache) {
+        if (productId == null) {
+            return null;
+        }
+
+        if (productCache.containsKey(productId)) {
+            return productCache.get(productId);
+        }
+
+        try {
+            ProduitFinalDto product = clientInventaire.getProduitFinalById(productId);
+            productCache.put(productId, product);
+            return product;
+        } catch (Exception e) {
+            System.err.println("Unable to fetch product for reservation calculation: " + productId + " - " + e.getMessage());
+            productCache.put(productId, null);
+            return null;
+        }
+    }
+
+    private ArticleSecDto getArticleForReservation(UUID articleId, Map<UUID, ArticleSecDto> articleCache) {
+        if (articleId == null) {
+            return null;
+        }
+
+        if (articleCache.containsKey(articleId)) {
+            return articleCache.get(articleId);
+        }
+
+        try {
+            ArticleSecDto article = clientInventaire.getArticleById(articleId);
+            articleCache.put(articleId, article);
+            return article;
+        } catch (Exception e) {
+            System.err.println("Unable to fetch article for reservation calculation: " + articleId + " - " + e.getMessage());
+            articleCache.put(articleId, null);
+            return null;
+        }
+    }
+
+    private double calculateReservationNeed(
+            BomLineDto line,
+            Double productionQuantity,
+            ArticleSecDto article,
+            Map<UUID, ArticleSecDto> articleCache
+    ) {
+        double quantity = productionQuantity != null ? productionQuantity : 0.0;
+        double rawNeed = line.getQuantity() * quantity;
+
+        if (article == null || article.getCategorie() == null || article.getConfiguration() == null) {
+            return rawNeed;
+        }
+
+        if ("COLIS".equalsIgnoreCase(article.getCategorie())) {
+            int unitsPerColis = intFromConfig(article.getConfiguration(), "unitsPerColis");
+            if (unitsPerColis > 0) {
+                return Math.ceil((quantity / unitsPerColis) * line.getQuantity());
+            }
+        }
+
+        if ("PALETTE".equalsIgnoreCase(article.getCategorie())) {
+            int unitsPerPalette = calculateUnitsPerPalette(article, articleCache);
+            if (unitsPerPalette > 0) {
+                return Math.ceil((quantity / unitsPerPalette) * line.getQuantity());
+            }
+        }
+
+        return rawNeed;
+    }
+
+    private int calculateUnitsPerPalette(ArticleSecDto paletteArticle, Map<UUID, ArticleSecDto> articleCache) {
+        Map<String, Object> config = paletteArticle.getConfiguration();
+        UUID colisId = uuidFromConfig(config, "colisId");
+        int colisPerLayer = intFromConfig(config, "colisPerLayer");
+        int numberOfLayers = intFromConfig(config, "numberOfLayers");
+
+        if (colisId == null || colisPerLayer <= 0 || numberOfLayers <= 0) {
+            return 0;
+        }
+
+        ArticleSecDto colisArticle = getArticleForReservation(colisId, articleCache);
+        if (colisArticle == null || colisArticle.getConfiguration() == null) {
+            return 0;
+        }
+
+        int unitsPerColis = intFromConfig(colisArticle.getConfiguration(), "unitsPerColis");
+        if (unitsPerColis <= 0) {
+            return 0;
+        }
+
+        return colisPerLayer * numberOfLayers * unitsPerColis;
+    }
+
+    private int intFromConfig(Map<String, Object> config, String key) {
+        Object value = config != null ? config.get(key) : null;
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    private UUID uuidFromConfig(Map<String, Object> config, String key) {
+        Object value = config != null ? config.get(key) : null;
+        if (value instanceof UUID uuid) {
+            return uuid;
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return UUID.fromString(text.trim());
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void rollbackReservations(Map<UUID, Integer> confirmedReservations) {
@@ -535,7 +702,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 prDto.setProjetId(projet.getId());
                 prDto.setArticleId(pr.getArticleId());
                 prDto.setQuantiteReservee(pr.getQuantiteReservee());
-                prDto.setStatut(pr.getStatut());
+                prDto.setStatut(normalizeReservationStatusForView(projet, pr));
                 rList.add(prDto);
             }
             dto.setReservations(rList);
@@ -565,6 +732,24 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         return dto;
+    }
+
+    private String normalizeReservationStatusForView(Projet projet, ProjetReservation reservation) {
+        String status = reservation.getStatut();
+        double quantity = reservation.getQuantiteReservee() == null ? 0d : reservation.getQuantiteReservee();
+
+        if (quantity <= 0d) {
+            return "CONSUMED";
+        }
+
+        if (status == null
+                || "FAILED".equalsIgnoreCase(status)
+                || "PENDING".equalsIgnoreCase(status)
+                || "PRE-CALCULE".equalsIgnoreCase(status)) {
+            return "CONFIRMED";
+        }
+
+        return status;
     }
 
     private Client resolveClient(ProjetDto dto) {

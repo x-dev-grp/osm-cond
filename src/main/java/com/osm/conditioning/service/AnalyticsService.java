@@ -4,6 +4,7 @@ import com.osm.conditioning.Enum.ResultStatus;
 import com.osm.conditioning.Enum.StatutOF;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.client.clientProductionAnalytics;
+import com.osm.conditioning.dto.ArticleSecDto;
 import com.osm.conditioning.dto.BOMDto;
 import com.osm.conditioning.dto.BomLineDto;
 import com.osm.conditioning.dto.analytics.*;
@@ -194,6 +195,7 @@ public class AnalyticsService {
                     BomGapDto dto = new BomGapDto();
                     dto.setMaterialName("Article " + line.getArticleId().toString().substring(0, 8) + " — OF: " + of.getCode());
                     dto.setPlannedQuantity(planned);
+                    dto.setMaterialName(resolveBomGapMaterialName(line.getArticleId(), of.getCode()));
                     dto.setActualQuantity(actual);
                     dto.setGapQuantity(gap);
                     dto.setGapPercentage(gapPct);
@@ -224,6 +226,27 @@ public class AnalyticsService {
     // ─────────────────────────────────────────────
     // Helper
     // ─────────────────────────────────────────────
+    private String resolveBomGapMaterialName(UUID articleId, String ofCode) {
+        String articleName = "Article inconnu";
+
+        if (articleId != null) {
+            try {
+                ArticleSecDto article = inventaireClient.getArticleById(articleId);
+                if (article != null && article.getNom() != null && !article.getNom().isBlank()) {
+                    articleName = article.getNom().trim();
+                }
+            } catch (Exception e) {
+                log.warn("Impossible de recuperer le nom de l'article {} pour le rapport BOM: {}", articleId, e.getMessage());
+            }
+        }
+
+        if (ofCode == null || ofCode.isBlank()) {
+            return articleName;
+        }
+
+        return articleName + " - OF: " + ofCode;
+    }
+
     private OfYieldDto mapToYieldDtoFromProjection(OfAnalyticsProjection of) {
         OfYieldDto dto = new OfYieldDto();
         dto.setOfCode(of.getCode());

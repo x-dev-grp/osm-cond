@@ -6,6 +6,7 @@ import com.google.zxing.WriterException;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
+import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.client.clientInventaire;
 import com.osm.conditioning.Enum.StatutOF;
 import com.osm.conditioning.dto.ArticleSecDto;
@@ -28,6 +29,8 @@ import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.models.Action;
 import com.xdev.xdevbase.repos.BaseRepository;
 import com.xdev.xdevbase.services.impl.BaseServiceImpl;
+import com.xdev.communicator.models.shared.ApiResponse;
+import com.xdev.communicator.models.shared.StorageUnitDto;
 import jakarta.persistence.EntityNotFoundException;
 import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
@@ -45,10 +48,13 @@ import java.util.stream.Collectors;
 @Service
 public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto, ExpeditionDto> {
 
+    private static final String PROJECT_STATUS_VALIDE = "VALIDE";
+
     private final ExpeditionRepository expeditionRepository;
     private final ExpeditionArticleRepository expeditionArticleRepository;
     private final ProjetRepository projetRepository;
     private final clientInventaire inventaireClient;
+    private final clientProductionStorage productionStorageClient;
     private final OrdreFabricationRepository ofRepository;
     private final TraceabilityService traceabilityService;
 
@@ -59,7 +65,9 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             ExpeditionRepository expeditionRepository,
             ExpeditionArticleRepository expeditionArticleRepository,
             ProjetRepository projetRepository,
-            clientInventaire inventaireClient, OrdreFabricationRepository ofRepository,
+            clientInventaire inventaireClient,
+            clientProductionStorage productionStorageClient,
+            OrdreFabricationRepository ofRepository,
             TraceabilityService traceabilityService
     ) {
         super(repository, codeGenerator, modelMapper);
@@ -67,6 +75,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         this.expeditionArticleRepository = expeditionArticleRepository;
         this.projetRepository = projetRepository;
         this.inventaireClient = inventaireClient;
+        this.productionStorageClient = productionStorageClient;
         this.ofRepository = ofRepository;
         this.traceabilityService = traceabilityService;
     }
@@ -145,6 +154,8 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     public ExpeditionDto create(ExpeditionCreationRequest request) {
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(request.getProjetId())
                 .orElseThrow(() -> new EntityNotFoundException("Projet introuvable : " + request.getProjetId()));
+
+        ensureProjectAcceptsNewExpedition(projet);
 
         if (projet.getClient() == null || projet.getClient().getId() == null) {
             throw new IllegalStateException("Le projet n'a pas de client exploitable pour l'expedition");
@@ -229,6 +240,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     public ExpeditionDto addLine(UUID expeditionId, ExpeditionLineCreateRequest request) {
         Expedition expedition = findExpedition(expeditionId);
         ensureEditable(expedition.getStatus());
+        ensureProjectAcceptsAdditionalExpeditionLine(expedition.getProjet());
 
         appendLine(expedition, request);
         Expedition saved = expeditionRepository.save(expedition);
@@ -323,6 +335,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         appendActionComment(expedition, "DELIVERED", request);
 
         Expedition saved = expeditionRepository.save(expedition);
+        markProjectValidIfFullyDelivered(saved);
         return toDto(saved);
     }
 
@@ -338,6 +351,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         appendActionComment(expedition, "CLOSED", request);
 
         Expedition saved = expeditionRepository.save(expedition);
+        markProjectValidIfFullyDelivered(saved);
         return toDto(saved);
     }
 
@@ -515,9 +529,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             if ((quantity == null || quantity <= 0) && of.getQuantiteCible() != null && of.getQuantiteCible().signum() > 0) {
                 quantity = of.getQuantiteCible().intValue();
             }
-            if (lotNumber == null && of.getLotVracId() != null) {
-                lotNumber = of.getLotVracId().toString();
-            }
+            lotNumber = resolveExpeditionLotNumber(of, lotNumber);
 
             int alreadyAllocated = sumAllocatedQuantityForOf(of.getId(), expedition.getId());
             int currentExpeditionQty = expedition.getLines().stream()
@@ -763,9 +775,147 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         dto.setArticleName(line.getArticleNameSnapshot());
         dto.setQuantity(line.getQuantity());
         dto.setVolume(line.getVolume());
-        dto.setLotNumber(line.getLotNumber());
+        dto.setLotNumber(resolveLineLotNumberForDisplay(line));
         dto.setUnit(line.getUnit());
         return dto;
+    }
+
+    private void ensureProjectAcceptsNewExpedition(Projet projet) {
+        if (projet == null) {
+            throw new IllegalArgumentException("Projet expedition invalide");
+        }
+
+        if (isCompletedProjectStatus(projet.getStatut()) || isProjectFullyDelivered(projet)) {
+            throw new IllegalStateException("Projet deja livre. Impossible de creer une nouvelle expedition.");
+        }
+    }
+
+    private void ensureProjectAcceptsAdditionalExpeditionLine(Projet projet) {
+        if (projet == null) {
+            return;
+        }
+
+        if (isCompletedProjectStatus(projet.getStatut()) || isProjectFullyDelivered(projet)) {
+            throw new IllegalStateException("Projet deja livre. Impossible d'ajouter une ligne d'expedition.");
+        }
+    }
+
+    private void markProjectValidIfFullyDelivered(Expedition expedition) {
+        if (expedition == null || expedition.getProjet() == null || expedition.getProjet().getId() == null) {
+            return;
+        }
+
+        Projet projet = projetRepository.findByIdAndIsDeletedFalse(expedition.getProjet().getId())
+                .orElse(expedition.getProjet());
+
+        if (!isProjectFullyDelivered(projet)) {
+            return;
+        }
+
+        if (isCancelledProjectStatus(projet.getStatut())) {
+            return;
+        }
+
+        if (!PROJECT_STATUS_VALIDE.equalsIgnoreCase(normalizeStatus(projet.getStatut()))) {
+            projet.setStatut(PROJECT_STATUS_VALIDE);
+            projetRepository.save(projet);
+        }
+    }
+
+    private boolean isProjectFullyDelivered(Projet projet) {
+        if (projet == null || projet.getId() == null || projet.getQuantiteCible() == null || projet.getQuantiteCible() <= 0) {
+            return false;
+        }
+
+        return sumDeliveredProjectQuantity(projet.getId()) + 0.0001 >= projet.getQuantiteCible();
+    }
+
+    private int sumDeliveredProjectQuantity(UUID projectId) {
+        return expeditionRepository.findAllByProjetIdAndIsDeletedFalseOrderByCreatedDateDesc(projectId)
+                .stream()
+                .filter(expedition -> expedition.getStatus() == ExpeditionStatus.DELIVERED
+                        || expedition.getStatus() == ExpeditionStatus.CLOSED)
+                .flatMap(expedition -> expedition.getLines().stream())
+                .map(ExpeditionArticle::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+    }
+
+    private boolean isCompletedProjectStatus(String status) {
+        String normalized = normalizeStatus(status);
+        return PROJECT_STATUS_VALIDE.equals(normalized)
+                || "COMPLETED".equals(normalized)
+                || "ACCEPTE".equals(normalized);
+    }
+
+    private boolean isCancelledProjectStatus(String status) {
+        String normalized = normalizeStatus(status);
+        return "ANNULE".equals(normalized) || "CANCELLED".equals(normalized);
+    }
+
+    private String normalizeStatus(String status) {
+        return status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String resolveLineLotNumberForDisplay(ExpeditionArticle line) {
+        String current = normalizeNullable(line.getLotNumber());
+        if (current != null && !isUuidLike(current)) {
+            return current;
+        }
+
+        if (line.getOfId() == null) {
+            return null;
+        }
+
+        return ofRepository.findById(line.getOfId())
+                .map(of -> resolveExpeditionLotNumber(of, current))
+                .orElse(null);
+    }
+
+    private String resolveExpeditionLotNumber(OrdreFabrication of, String requestedLotNumber) {
+        String normalized = normalizeNullable(requestedLotNumber);
+        if (normalized != null && !isUuidLike(normalized)) {
+            return normalized;
+        }
+
+        if (of == null || of.getLotVracId() == null) {
+            return null;
+        }
+
+        return resolveStorageLotLabel(of.getLotVracId());
+    }
+
+    private String resolveStorageLotLabel(UUID storageUnitId) {
+        try {
+            ApiResponse<StorageUnitDto> response = productionStorageClient.getStorageUnit(storageUnitId);
+            if (response == null || !response.isSuccess() || response.getData() == null) {
+                return null;
+            }
+
+            StorageUnitDto storageUnit = response.getData();
+            String lotNumber = normalizeNullable(storageUnit.getLotNumber());
+            if (lotNumber != null) {
+                return lotNumber;
+            }
+
+            return normalizeNullable(storageUnit.getName());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean isUuidLike(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+
+        try {
+            UUID.fromString(value.trim());
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     private String generateExpeditionNumber() {

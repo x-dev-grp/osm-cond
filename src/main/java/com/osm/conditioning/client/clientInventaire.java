@@ -7,7 +7,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -28,6 +30,10 @@ public interface clientInventaire {
 
     @GetMapping("/api/inventaire/boms/product/{productId}/active")
     BOMDto getActiveBomForProduct(@PathVariable("productId") UUID productId);
+
+    @GetMapping("/api/inventaire/boms/{id}/material-needs")
+    List<MaterialNeedLineDto> getMaterialNeeds(@PathVariable("id") UUID id,
+                                               @RequestParam("quantity") double quantity);
 
     @GetMapping("/api/inventaire/stocks/article/{articleId}")
     StockSecDto getStockByArticle(@PathVariable("articleId") UUID articleId);

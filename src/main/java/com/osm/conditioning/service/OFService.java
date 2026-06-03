@@ -115,10 +115,13 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto creerOF(OrdreFabricationDto dto) {
+        if (dto.getProjectId() == null) {
+            throw new RuntimeException("Le projet est obligatoire pour creer un OF");
+        }
+
         com.osm.conditioning.projet.entity.Projet projet = null;
         if (dto.getProjectId() != null) {
             projet = projetService.findByIdOrThrow(dto.getProjectId());
-            projetService.ensureNotFailed(dto.getProjectId());
         }
 
         // Héritage des données du projet si non spécifiées dans le DTO
@@ -193,16 +196,38 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         of.setStatut(StatutOF.PLANIFIE);
         of.setProjet(projet);
 
+        Map<UUID, ArticleSecDto> articleCache = new HashMap<>();
+        double productionQuantity = quantiteCible != null ? quantiteCible.doubleValue() : 0.0;
+
         for (BomLineDto lineBOMDto : bom.getLines()) {
             LigneOF ligneOF = new LigneOF();
             ligneOF.setOf(of);
             ligneOF.setArticleId(lineBOMDto.getArticleId());
-            BigDecimal qteTheorique = BigDecimal.valueOf(lineBOMDto.getQuantity()).multiply(quantiteCible);
+            ArticleSecDto article = getArticleForMaterialCalculation(lineBOMDto.getArticleId(), articleCache);
+            BigDecimal qteTheorique = BigDecimal.valueOf(calculateMaterialNeed(lineBOMDto, productionQuantity, article, articleCache));
             ligneOF.setQuantiteTheorique(qteTheorique);
             of.getLignes().add(ligneOF);
         }
 
-        OrdreFabrication saved = ofRepository.save(of);
+        Map<UUID, Integer> standaloneReservations = new LinkedHashMap<>();
+        if (projet != null) {
+            List<String> ruptures = findReservedStockRupturesFromMaterialNeeds(bom.getId(), productionQuantity);
+            if (!ruptures.isEmpty()) {
+                throw new RuntimeException("Stock reserve insuffisant pour creer l'OF : " + String.join(" ; ", ruptures));
+            }
+            projet = clearFailedProjectStatusIfReservationsAreUsable(projet);
+            of.setProjet(projet);
+        } else {
+            standaloneReservations = reserveStandaloneOfStock(of.getLignes());
+        }
+
+        OrdreFabrication saved;
+        try {
+            saved = ofRepository.save(of);
+        } catch (Exception e) {
+            rollbackInventoryReservations(standaloneReservations);
+            throw e;
+        }
 
         QrCodeInfo qrInfo = generateQrInfo(saved.getClass().toString(), saved.getId());
         OrdreFabricationDto result = convertToDto(saved);
@@ -264,32 +289,44 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         boolean projectMode = of.getProjet() != null;
 
         if (projectMode && of.getProjet() != null && of.getProjet().getId() != null) {
-            projetService.ensureNotFailed(of.getProjet().getId());
-        }
-
-        List<String> ruptures = new ArrayList<>();
-        for (LigneOF ligne : of.getLignes()) {
-            UUID articleId = ligne.getArticleId();
-            int besoin = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
-
-            StockSecDto stock;
-            try {
-                stock = getOrCreateStockForArticle(articleId);
-            } catch (Exception e) {
-                throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + resolveArticleLabel(articleId), e);
-            }
-
-            int quantiteDisponible = getStartableQuantity(stock, projectMode);
-            String stockLabel = projectMode ? "reserve" : "disponible";
-
-            if (quantiteDisponible < besoin) {
-                ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
-                        resolveArticleLabel(articleId), besoin, stockLabel, quantiteDisponible));
+            com.osm.conditioning.projet.entity.Projet projet = projetRepository
+                    .findByIdAndIsDeletedFalse(of.getProjet().getId())
+                    .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + of.getProjet().getId()));
+            double productionQuantity = of.getQuantiteCible() != null ? of.getQuantiteCible().doubleValue() : 0.0;
+            List<String> projectReservationRuptures = findReservedStockRupturesFromMaterialNeeds(of.getBomId(), productionQuantity);
+            if (!projectReservationRuptures.isEmpty()) {
+                throw new RuntimeException("Stock reserve projet insuffisant pour demarrer l'OF : "
+                        + String.join(" ; ", projectReservationRuptures));
             }
         }
 
-        if (!ruptures.isEmpty()) {
-            throw new RuntimeException("Stock insuffisant pour demarrer l'OF : " + String.join(" ; ", ruptures));
+        if (!projectMode) {
+            List<String> ruptures = new ArrayList<>();
+            for (LigneOF ligne : of.getLignes()) {
+                UUID articleId = ligne.getArticleId();
+                int besoin = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
+
+                StockSecDto stock;
+                try {
+                    stock = getOrCreateStockForArticle(articleId);
+                } catch (Exception e) {
+                    throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + resolveArticleLabel(articleId), e);
+                }
+
+                int reservedQuantity = stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+                boolean useReservedStock = reservedQuantity >= besoin;
+                int quantiteDisponible = getStartableQuantity(stock, useReservedStock);
+                String stockLabel = useReservedStock ? "reserve" : "disponible";
+
+                if (quantiteDisponible < besoin) {
+                    ruptures.add(String.format("Article %s : besoin = %d, %s = %d",
+                            resolveArticleLabel(articleId), besoin, stockLabel, quantiteDisponible));
+                }
+            }
+
+            if (!ruptures.isEmpty()) {
+                throw new RuntimeException("Stock insuffisant pour demarrer l'OF : " + String.join(" ; ", ruptures));
+            }
         }
 
         of.setDateDebutReelle(LocalDateTime.now());
@@ -347,6 +384,11 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             BigDecimal quantiteConsommee = ligne.getQuantiteReelle() != null ? ligne.getQuantiteReelle() : ligne.getQuantiteTheorique();
 
             if (quantiteConsommee != null && quantiteConsommee.compareTo(BigDecimal.ZERO) > 0) {
+                if (of.getProjet() != null) {
+                    decrementProjectReservation(of, ligne.getArticleId(), quantiteConsommee.doubleValue());
+                    continue;
+                }
+
                 try {
                     Map<String, Object> payload = new HashMap<>();
                     payload.put("quantite", com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee));
@@ -354,12 +396,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                     payload.put("referenceType", "OF");
                     payload.put("referenceId", of.getId() != null ? of.getId().toString() : null);
 
-                    if (of.getProjet() != null) {
-                        clientInventaire.consommerReservation(ligne.getArticleId(), payload);
-                        decrementProjectReservation(of, ligne.getArticleId(), quantiteConsommee.doubleValue());
-                    } else {
-                        clientInventaire.sortieStock(ligne.getArticleId(), payload);
-                    }
+                    consumeStandaloneOfStock(ligne.getArticleId(), payload, com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee));
                 } catch (Exception e) {
                     throw new RuntimeException("Erreur lors de la sortie de stock pour l'article " + ligne.getArticleId() + " : " + e.getMessage(), e);
                 }
@@ -426,8 +463,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             double current = reservation.getQuantiteReservee() == null ? 0d : reservation.getQuantiteReservee();
             double updated = Math.max(0d, current - consumedQty);
             reservation.setQuantiteReservee(updated);
-            if (updated == 0d && "CONFIRMED".equalsIgnoreCase(reservation.getStatut())) {
+            if (updated == 0d) {
                 reservation.setStatut("CONSUMED");
+            } else if ("FAILED".equalsIgnoreCase(reservation.getStatut())) {
+                reservation.setStatut("CONFIRMED");
             }
             projetRepository.save(projet);
             return;
@@ -451,22 +490,25 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Article non trouve dans l'OF : " + ajustement.getArticleId()));
 
-        StockSecDto stock;
-        try {
-            stock = getOrCreateStockForArticle(ajustement.getArticleId());
-        } catch (Exception e) {
-            throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + ajustement.getArticleId(), e);
-        }
-
-        int quantiteDemandee = ajustement.getQuantiteReelle().intValue();
+        int quantiteDemandee = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ajustement.getQuantiteReelle());
         if (of.getProjet() != null) {
-            int quantiteReserved = stock != null && stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+            int quantiteReserved = getProjectReservedQuantity(of, ajustement.getArticleId());
             if (quantiteDemandee > quantiteReserved) {
-                throw new RuntimeException("La quantite ajustee depasse le stock reserve disponible pour cet article");
+                throw new RuntimeException("La quantite ajustee depasse le stock reserve du projet pour l'article : "
+                        + resolveArticleLabel(ajustement.getArticleId()));
             }
         } else {
+            StockSecDto stock;
+            try {
+                stock = getOrCreateStockForArticle(ajustement.getArticleId());
+            } catch (Exception e) {
+                throw new RuntimeException("Impossible de recuperer le stock pour l'article : " + ajustement.getArticleId(), e);
+            }
+
+            int quantiteReservee = stock != null && stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
             int quantiteDisponible = stock != null && stock.getQuantiteDisponible() != null ? stock.getQuantiteDisponible() : 0;
-            if (quantiteDemandee > quantiteDisponible) {
+            int quantiteUtilisable = quantiteReservee >= quantiteDemandee ? quantiteReservee : quantiteDisponible;
+            if (quantiteDemandee > quantiteUtilisable) {
                 throw new RuntimeException("La quantite ajustee depasse le stock disponible pour cet article");
             }
         }
@@ -475,6 +517,202 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         ligne.setMotifAjustement(ajustement.getMotif());
 
         return convertToDto(ofRepository.save(of));
+    }
+
+    private int getProjectReservedQuantity(OrdreFabrication of, UUID articleId) {
+        if (of == null || of.getProjet() == null || of.getProjet().getId() == null || articleId == null) {
+            return 0;
+        }
+
+        return projetRepository.findByIdAndIsDeletedFalse(of.getProjet().getId())
+                .map(projet -> projet.getReservations() == null ? 0 : projet.getReservations().stream()
+                        .filter(reservation -> articleId.equals(reservation.getArticleId()))
+                        .filter(reservation -> !"RELEASED".equalsIgnoreCase(reservation.getStatut()))
+                        .filter(reservation -> !"CONSUMED".equalsIgnoreCase(reservation.getStatut()))
+                        .mapToDouble(reservation -> reservation.getQuantiteReservee() == null ? 0d : reservation.getQuantiteReservee())
+                        .mapToInt(com.osm.conditioning.util.InventoryQuantityUtil::ceilToInt)
+                        .sum())
+                .orElse(0);
+    }
+
+    private List<String> findReservedStockRupturesFromMaterialNeeds(UUID bomId, double productionQuantity) {
+        List<String> ruptures = new ArrayList<>();
+        List<MaterialNeedLineDto> needs = clientInventaire.getMaterialNeeds(bomId, productionQuantity);
+
+        if (needs == null) {
+            return ruptures;
+        }
+
+        for (MaterialNeedLineDto line : needs) {
+            int besoin = line.getQuantityNeededRounded();
+            int reserve = line.getQuantiteReservee() != null ? line.getQuantiteReservee() : 0;
+
+            if (reserve < besoin) {
+                ruptures.add(String.format("Article %s : besoin = %d, reserve = %d",
+                        line.getArticleName() != null ? line.getArticleName() : line.getArticleId(),
+                        besoin,
+                        reserve));
+            }
+        }
+
+        return ruptures;
+    }
+
+    private com.osm.conditioning.projet.entity.Projet clearFailedProjectStatusIfReservationsAreUsable(
+            com.osm.conditioning.projet.entity.Projet projet
+    ) {
+        if (projet == null || projet.getId() == null || projet.getStatut() == null) {
+            return projet;
+        }
+
+        if (!"FAILED".equalsIgnoreCase(projet.getStatut())) {
+            return projet;
+        }
+
+        projetService.updateStatus(projet.getId(), "BROUILLON");
+        return projetService.findByIdOrThrow(projet.getId());
+    }
+
+    private Map<UUID, Integer> reserveStandaloneOfStock(List<LigneOF> lignes) {
+        Map<UUID, Integer> needs = aggregateRoundedNeeds(lignes);
+        Map<UUID, Integer> confirmedReservations = new LinkedHashMap<>();
+
+        for (Map.Entry<UUID, Integer> entry : needs.entrySet()) {
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("quantite", entry.getValue());
+                clientInventaire.reserverStock(entry.getKey(), payload);
+                confirmedReservations.put(entry.getKey(), entry.getValue());
+            } catch (Exception e) {
+                rollbackInventoryReservations(confirmedReservations);
+                throw new RuntimeException("Stock disponible insuffisant pour reserver l'OF : "
+                        + resolveArticleLabel(entry.getKey()) + " - " + e.getMessage(), e);
+            }
+        }
+
+        return confirmedReservations;
+    }
+
+    private Map<UUID, Integer> aggregateRoundedNeeds(List<LigneOF> lignes) {
+        Map<UUID, Integer> needs = new LinkedHashMap<>();
+        for (LigneOF ligne : lignes) {
+            int besoin = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
+            needs.merge(ligne.getArticleId(), besoin, Integer::sum);
+        }
+        return needs;
+    }
+
+    private void rollbackInventoryReservations(Map<UUID, Integer> confirmedReservations) {
+        for (Map.Entry<UUID, Integer> entry : confirmedReservations.entrySet()) {
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("quantite", entry.getValue());
+                clientInventaire.annulerReservation(entry.getKey(), payload);
+            } catch (Exception e) {
+                log.warn("Rollback reservation failed for article {}: {}", entry.getKey(), e.getMessage());
+            }
+        }
+    }
+
+    private ArticleSecDto getArticleForMaterialCalculation(UUID articleId, Map<UUID, ArticleSecDto> articleCache) {
+        if (articleId == null) {
+            return null;
+        }
+
+        if (articleCache.containsKey(articleId)) {
+            return articleCache.get(articleId);
+        }
+
+        try {
+            ArticleSecDto article = clientInventaire.getArticleById(articleId);
+            articleCache.put(articleId, article);
+            return article;
+        } catch (Exception e) {
+            articleCache.put(articleId, null);
+            return null;
+        }
+    }
+
+    private double calculateMaterialNeed(
+            BomLineDto line,
+            double productionQuantity,
+            ArticleSecDto article,
+            Map<UUID, ArticleSecDto> articleCache
+    ) {
+        double rawNeed = line.getQuantity() * productionQuantity;
+
+        if (article == null || article.getCategorie() == null || article.getConfiguration() == null) {
+            return rawNeed;
+        }
+
+        if ("COLIS".equalsIgnoreCase(article.getCategorie())) {
+            int unitsPerColis = intFromConfig(article.getConfiguration(), "unitsPerColis");
+            if (unitsPerColis > 0) {
+                return Math.ceil((productionQuantity / unitsPerColis) * line.getQuantity());
+            }
+        }
+
+        if ("PALETTE".equalsIgnoreCase(article.getCategorie())) {
+            int unitsPerPalette = calculateUnitsPerPalette(article, articleCache);
+            if (unitsPerPalette > 0) {
+                return Math.ceil((productionQuantity / unitsPerPalette) * line.getQuantity());
+            }
+        }
+
+        return rawNeed;
+    }
+
+    private int calculateUnitsPerPalette(ArticleSecDto paletteArticle, Map<UUID, ArticleSecDto> articleCache) {
+        Map<String, Object> config = paletteArticle.getConfiguration();
+        UUID colisId = uuidFromConfig(config, "colisId");
+        int colisPerLayer = intFromConfig(config, "colisPerLayer");
+        int numberOfLayers = intFromConfig(config, "numberOfLayers");
+
+        if (colisId == null || colisPerLayer <= 0 || numberOfLayers <= 0) {
+            return 0;
+        }
+
+        ArticleSecDto colisArticle = getArticleForMaterialCalculation(colisId, articleCache);
+        if (colisArticle == null || colisArticle.getConfiguration() == null) {
+            return 0;
+        }
+
+        int unitsPerColis = intFromConfig(colisArticle.getConfiguration(), "unitsPerColis");
+        if (unitsPerColis <= 0) {
+            return 0;
+        }
+
+        return colisPerLayer * numberOfLayers * unitsPerColis;
+    }
+
+    private int intFromConfig(Map<String, Object> config, String key) {
+        Object value = config != null ? config.get(key) : null;
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    private UUID uuidFromConfig(Map<String, Object> config, String key) {
+        Object value = config != null ? config.get(key) : null;
+        if (value instanceof UUID uuid) {
+            return uuid;
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return UUID.fromString(text.trim());
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private String resolveArticleLabel(UUID articleId) {
@@ -503,6 +741,18 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             return stock.getQuantiteDisponible();
         }
         return stock.getQuantiteActuelle() != null ? stock.getQuantiteActuelle() : 0;
+    }
+
+    private void consumeStandaloneOfStock(UUID articleId, Map<String, Object> payload, int quantity) {
+        StockSecDto stock = getOrCreateStockForArticle(articleId);
+        int reservedQuantity = stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+
+        if (reservedQuantity >= quantity) {
+            clientInventaire.consommerReservation(articleId, payload);
+            return;
+        }
+
+        clientInventaire.sortieStock(articleId, payload);
     }
 
     private StockSecDto getOrCreateStockForArticle(UUID articleId) {

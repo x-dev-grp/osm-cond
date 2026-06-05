@@ -67,7 +67,7 @@ public class TraceabilityService {
                 refreshRuntimeEventChains(snapshot, projectId, ofs,  expedition);
                 return snapshot;
             } catch (Exception e) {
-                log.warn("Snapshot JSON invalide pour  expedition {}, reconstruction  live", expedition.getId());
+                log.warn("Snapshot JSON invalide pour  expedition {}, reconstruction   live", expedition.getId());
             }
         }
         return buildTraceabilityMap(projectId, ofs, expedition);
@@ -166,7 +166,7 @@ public class TraceabilityService {
             List<OrdreFabrication> ofs = resolveExpeditionOfs(expedition);
             UUID projectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
             Map<String, Object> snapshot = buildTraceabilityMap(projectId, ofs, expedition);
-            
+
             String json = objectMapper.writeValueAsString(snapshot);
             expedition.setTraceabilitySnapshotJson(json);
 
@@ -190,7 +190,7 @@ public class TraceabilityService {
             Map<String, Object> ofSnapshot = new LinkedHashMap<>();
             ofSnapshot.put("code", valueOrEmpty(of.getCode()));
             ofSnapshot.put("productId", of.getProductId() != null ? of.getProductId().toString() : "");
-            
+
             if (of.getProductId() != null) {
                 try {
                     ProduitFinalDto product = inventaireClient.getProduitFinalById(of.getProductId());

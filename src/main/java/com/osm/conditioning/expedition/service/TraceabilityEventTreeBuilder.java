@@ -22,30 +22,30 @@ import java.util.UUID;
 /**
  * Reconstructs a chronological event tree at runtime for project / expedition traceability.
  */
-final class TraceabilityEventTreeBuilder {
+final class TraceabilityEventTreeBuilder     {
 
-    private TraceabilityEventTreeBuilder() {
+    private TraceabilityEventTreeBuilder()  {
     }
 
     static List<Map<String, Object>> buildChains(
             UUID projectId,
             List<OrdreFabrication> ofs,
-            Map<String, GenealogyDto> genealogyByAnchor,
-            Map<String, List<Map<String, Object>>> labelsByAnchor,
+            Map<String, GenealogyDto>  genealogyByAnchor,
+            Map<String, List<Map<String, Object>>> labelsByAnchor ,
             List<Expedition> expeditions) {
 
-        Map<UUID, List<Expedition>> expeditionsByOfId = indexExpeditionsByOf(expeditions);
+        Map<UUID, List<Expedition>> expeditionsByOfId =  indexExpeditionsByOf(expeditions);
 
         List<Map<String, Object>> chains = new ArrayList<>();
         for (OrdreFabrication of : ofs) {
             UUID anchor = of.getTraceabilityLotId() != null ? of.getTraceabilityLotId() : of.getLotVracId();
             String anchorKey = anchor != null ? anchor.toString() : null;
-            GenealogyDto genealogy = anchorKey != null ? genealogyByAnchor.get(anchorKey) : null;
+            GenealogyDto genealogy =  anchorKey != null ? genealogyByAnchor.get(anchorKey) : null;
             List<Map<String, Object>> labels = anchorKey != null
                     ? labelsByAnchor.getOrDefault(anchorKey, List.of())
                     : List.of();
 
-            Map<String, Object> chain = new LinkedHashMap<>();
+            Map<String, Object> chain = new  LinkedHashMap<>();
             chain.put("ofId", of.getId() != null ? of.getId().toString() : "");
             chain.put("ofCode", of.getCode());
             chain.put("projectId", projectId != null ? projectId.toString() : "");

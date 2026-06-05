@@ -56,18 +56,18 @@ public class TraceabilityService {
     @Transactional(readOnly = true)
     public Map<String, Object> getExpeditionTraceability(Expedition expedition) {
         UUID projectId = expedition.getProjet() != null ? expedition.getProjet().getId() : null;
-        List<OrdreFabrication> ofs = resolveExpeditionOfs(expedition);
+        List<OrdreFabrication> ofs =  resolveExpeditionOfs(expedition);
 
         if (expedition.getTraceabilitySnapshotJson() != null
-                && !expedition.getTraceabilitySnapshotJson().isBlank()) {
-            try {
+                &&  !expedition.getTraceabilitySnapshotJson().isBlank()) {
+            try  {
                 Map<String, Object> snapshot = objectMapper.readValue(
                         expedition.getTraceabilitySnapshotJson(),
                         new TypeReference<LinkedHashMap<String, Object>>() {});
-                refreshRuntimeEventChains(snapshot, projectId, ofs, expedition);
+                refreshRuntimeEventChains(snapshot, projectId, ofs,  expedition);
                 return snapshot;
             } catch (Exception e) {
-                log.warn("Snapshot JSON invalide pour expedition {}, reconstruction live", expedition.getId());
+                log.warn("Snapshot JSON invalide pour  expedition {}, reconstruction  live", expedition.getId());
             }
         }
         return buildTraceabilityMap(projectId, ofs, expedition);

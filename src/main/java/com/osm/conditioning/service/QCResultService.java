@@ -3,13 +3,13 @@ package com.osm.conditioning.service;
 
 import com.osm.conditioning.Enum.StatutOF;
 import com.osm.conditioning.client.SecurityClient;
+import com.osm.conditioning.dto.AssignableUserDTO;
 import com.osm.conditioning.dto.QCResultDTO;
 import com.osm.conditioning.Enum.ControlType;
 import com.osm.conditioning.Enum.QualityStatus;
 import com.osm.conditioning.Enum.ResultStatus;
 import com.osm.conditioning.model.*;
 import com.osm.conditioning.repository.*;
-import com.xdev.communicator.models.shared.OSMUserDTO;
 import com.xdev.onsignalNotifcations.dto.NotificationRequest;
 import com.xdev.onsignalNotifcations.impl.OneSignalServiceImpl;
 import com.xdev.xdevbase.config.TenantContext;
@@ -115,11 +115,17 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
             of.setQualityStatus(QualityStatus.BLOCKED);
             ofRepository.save(of);
             try {
-                List<OSMUserDTO> responsables = securityClient.getUsersByRole("OSMADMIN").getBody();
+                List<AssignableUserDTO> responsables = securityClient
+                        .getUsersByPermission("CONDITIONING", "OF", "READ")
+                        .getBody();
+                if (responsables == null) {
+                    responsables = List.of();
+                }
                 log.info("Utilisateurs trouvés = {}", responsables.size());
                 List<String> userIds = responsables.stream()
-                        .map(OSMUserDTO::getOneSignalPlayerId)
+                        .map(AssignableUserDTO::getOneSignalPlayerId)
                         .filter(id -> id != null && !id.isBlank())
+                        .distinct()
                         .collect(Collectors.toList());
 
                 if (!userIds.isEmpty()) {
@@ -141,7 +147,7 @@ public class QCResultService extends BaseServiceImpl<QCResult, QCResultDTO, QCRe
                     oneSignalService.sendNotification(notif);
                 }
             } catch (Exception e) {
-                System.err.println("Erreur lors de l'envoi de la notification : " + e.getMessage());
+                log.warn("Erreur lors de l'envoi de la notification OF bloquee", e);
             }
         }
     }

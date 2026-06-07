@@ -85,9 +85,12 @@ public class LabelContentService {
 
     @Transactional(readOnly = true)
     public List<LabelContentDto> getAll() {
-        return labelContentRepository.findAll()
-                .stream()
-                .filter(labelContent -> !Boolean.TRUE.equals(labelContent.getDeleted()))
+        UUID tenantId = TenantContext.getCurrentTenant();
+        List<LabelContent> labels = tenantId == null
+                ? labelContentRepository.findAllByIsDeletedFalse()
+                : labelContentRepository.findAllByTenantIdAndIsDeletedFalse(tenantId);
+
+        return labels.stream()
                 .peek(this::ensureTraceabilityLotId)
                 .map(labelContent -> toDto(labelContent, validateLabel(labelContent)))
                 .toList();
@@ -275,7 +278,6 @@ public class LabelContentService {
         }
 
         return getByProductEntities(productId).stream()
-                .filter(labelContent -> !Boolean.TRUE.equals(labelContent.getDeleted()))
                 .max(Comparator.comparing(LabelContent::getCreatedDate, Comparator.nullsLast(Comparator.naturalOrder())))
                 .orElse(null);
     }

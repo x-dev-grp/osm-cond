@@ -7,6 +7,7 @@ import com.xdev.xdevbase.repos.BaseRepository;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,4 +19,6 @@ public interface OrdreFabricationRepository extends BaseRepository<OrdreFabricat
     List<OrdreFabrication> findByDateDebutPrevueBetween(LocalDateTime debut, LocalDateTime fin);
     List<OrdreFabrication> findAllByProjetIdAndIsDeletedFalse(UUID projetId);
     List<OfAnalyticsProjection> findByTenantIdAndIsDeletedFalse(UUID projetId);
+
+    long countByProductIdAndStatutInAndIsDeletedFalse(UUID productId, Collection<StatutOF> statuts);
 }

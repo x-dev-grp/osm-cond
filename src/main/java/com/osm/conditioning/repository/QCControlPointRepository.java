@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 
 public interface QCControlPointRepository extends BaseRepository<QCControlPoint> {
-        List<QCControlPoint> findByPlanIdAndBlockingTrue(UUID planId);
-        List<QCControlPoint> findByPlanId(UUID planId);
-    }
+    List<QCControlPoint> findByPlanIdAndBlockingTrueAndIsDeletedFalse(UUID planId);
+
+    List<QCControlPoint> findByPlanIdAndIsDeletedFalse(UUID planId);
+}

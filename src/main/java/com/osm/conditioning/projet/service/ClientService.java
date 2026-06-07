@@ -28,21 +28,19 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
         this.modelMapper = modelMapper;
     }
 
-
     public List<ClientDto> getAllClients() {
-        return clientRepository.findAll().stream()
+        return clientRepository.findAllByIsDeletedFalse().stream()
                 .map(client -> modelMapper.map(client, ClientDto.class))
                 .collect(Collectors.toList());
     }
+
     public Client findClientEntityById(UUID id) {
-        return clientRepository.findById(id)
+        return clientRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new RuntimeException("Client non trouvé avec id: " + id));
     }
 
-
     public ClientDto getClientById(UUID id) {
-        Client client = clientRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Client non trouvé avec id: " + id));
+        Client client = findClientEntityById(id);
         return modelMapper.map(client, ClientDto.class);
     }
 
@@ -53,22 +51,22 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
         }
         clientDto.setCodeClient(genererCodeClient());
         if (clientDto.getEmail() != null && !clientDto.getEmail().isEmpty()) {
-            if (clientRepository.existsByEmail(clientDto.getEmail())) {
+            if (clientRepository.existsByEmailAndIsDeletedFalse(clientDto.getEmail())) {
                 throw new RuntimeException("Un client avec cet email existe déjà: " + clientDto.getEmail());
             }
         }
         if (clientDto.getNumeroTva() != null && !clientDto.getNumeroTva().isEmpty()) {
-            if (clientRepository.existsByNumeroTva(clientDto.getNumeroTva())) {
+            if (clientRepository.existsByNumeroTvaAndIsDeletedFalse(clientDto.getNumeroTva())) {
                 throw new RuntimeException("Un client avec ce numéro de TVA existe déjà: " + clientDto.getNumeroTva());
             }
         }
         if (clientDto.getSiret() != null && !clientDto.getSiret().isEmpty()) {
-            if (clientRepository.existsBySiret(clientDto.getSiret())) {
+            if (clientRepository.existsBySiretAndIsDeletedFalse(clientDto.getSiret())) {
                 throw new RuntimeException("Un client avec ce SIRET existe déjà: " + clientDto.getSiret());
             }
         }
         if (clientDto.getTelephone() != null && !clientDto.getTelephone().isEmpty()) {
-            if (clientRepository.existsByTelephone(clientDto.getTelephone())) {
+            if (clientRepository.existsByTelephoneAndIsDeletedFalse(clientDto.getTelephone())) {
                 throw new RuntimeException("Un client avec ce téléphone existe déjà: " + clientDto.getTelephone());
             }
         }
@@ -82,15 +80,14 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
 
     @Transactional
     public ClientDto updateClient(UUID id, ClientDto clientDto) {
-        Client existingClient = clientRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Client non trouvé avec id: " + id));
+        Client existingClient = findClientEntityById(id);
 
         if (!StringUtils.hasText(clientDto.getNom())) {
             throw new RuntimeException("Le nom du client est obligatoire");
         }
         if (clientDto.getEmail() != null) {
             if (!clientDto.getEmail().equals(existingClient.getEmail())) {
-                if (clientRepository.existsByEmail(clientDto.getEmail())) {
+                if (clientRepository.existsByEmailAndIsDeletedFalseAndIdNot(clientDto.getEmail(), id)) {
                     throw new RuntimeException("Un client avec cet email existe déjà: " + clientDto.getEmail());
                 }
                 existingClient.setEmail(clientDto.getEmail());
@@ -100,7 +97,7 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
         }
         if (clientDto.getNumeroTva() != null) {
             if (!clientDto.getNumeroTva().equals(existingClient.getNumeroTva())) {
-                if (clientRepository.existsByNumeroTva(clientDto.getNumeroTva())) {
+                if (clientRepository.existsByNumeroTvaAndIsDeletedFalseAndIdNot(clientDto.getNumeroTva(), id)) {
                     throw new RuntimeException("Un client avec ce numéro de TVA existe déjà: " + clientDto.getNumeroTva());
                 }
                 existingClient.setNumeroTva(clientDto.getNumeroTva());
@@ -110,7 +107,7 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
         }
         if (clientDto.getSiret() != null) {
             if (!clientDto.getSiret().equals(existingClient.getSiret())) {
-                if (clientRepository.existsBySiret(clientDto.getSiret())) {
+                if (clientRepository.existsBySiretAndIsDeletedFalseAndIdNot(clientDto.getSiret(), id)) {
                     throw new RuntimeException("Un client avec ce SIRET existe déjà: " + clientDto.getSiret());
                 }
                 existingClient.setSiret(clientDto.getSiret());
@@ -120,7 +117,7 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
         }
         if (clientDto.getTelephone() != null) {
             if (!clientDto.getTelephone().equals(existingClient.getTelephone())) {
-                if (clientRepository.existsByTelephone(clientDto.getTelephone())) {
+                if (clientRepository.existsByTelephoneAndIsDeletedFalseAndIdNot(clientDto.getTelephone(), id)) {
                     throw new RuntimeException("Un client avec ce téléphone existe déjà: " + clientDto.getTelephone());
                 }
                 existingClient.setTelephone(clientDto.getTelephone());
@@ -140,37 +137,29 @@ public class ClientService extends BaseServiceImpl<Client, ClientDto, ClientDto>
         return modelMapper.map(updatedClient, ClientDto.class);
     }
 
-
-
     @Transactional
     public void desactiverClient(UUID id) {
-        Client client = clientRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Client non trouvé avec id: " + id));
+        Client client = findClientEntityById(id);
         client.setActif(false);
         clientRepository.save(client);
     }
 
     @Transactional
     public void activerClient(UUID id) {
-        Client client = clientRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Client non trouvé avec id: " + id));
+        Client client = findClientEntityById(id);
         client.setActif(true);
         clientRepository.save(client);
     }
 
-
     @Transactional
     public void deleteClient(UUID id) {
-        Client client = clientRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Client non trouvé avec id: " + id));
-        clientRepository.delete(client);
+        Client client = findClientEntityById(id);
+        client.setDeleted(true);
+        client.setActif(false);
+        clientRepository.save(client);
     }
-
 
     private String genererCodeClient() {
         return generateBusinessCode("codeClient", "CL");
     }
-
-
-
 }

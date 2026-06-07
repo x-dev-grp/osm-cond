@@ -278,7 +278,7 @@ public class TraceabilityService {
             if (line.getOfId() == null) {
                 continue;
             }
-            ofRepository.findById(line.getOfId()).ifPresent(of -> {
+            ofRepository.findByIdAndIsDeletedFalse(line.getOfId()).ifPresent(of -> {
                 UUID ofProjectId = of.getProjet() != null ? of.getProjet().getId() : null;
 
                 if (expeditionProjectId != null && Objects.equals(ofProjectId, expeditionProjectId)) {

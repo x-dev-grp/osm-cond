@@ -88,10 +88,19 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return modelMapper.map(entity, outDTOClass);
     }
 
+    private OrdreFabrication getOfEntityById(UUID id) {
+        return ofRepository.findByIdAndIsDeletedFalse(id)
+                .orElseThrow(() -> new EntityNotFoundException("OF non trouve avec l'id : " + id));
+    }
+
+    @Override
+    public OrdreFabrication getEntityById(UUID id) {
+        return getOfEntityById(id);
+    }
+
     @Override
     public OrdreFabricationDto findById(UUID id) {
-        OrdreFabrication of = repository.findByIdAndIsDeletedFalse(id)
-                .orElseThrow(() -> new EntityNotFoundException("Entity not found with this id " + id));
+        OrdreFabrication of = getOfEntityById(id);
         ensureTraceabilityLotId(of);
         return convertToDto(of);
     }
@@ -244,8 +253,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             throw new RuntimeException("L'ID est obligatoire pour la mise a jour");
         }
 
-        OrdreFabrication of = ofRepository.findById(dto.getId())
-                .orElseThrow(() -> new EntityNotFoundException("OF non trouve avec l'id : " + dto.getId()));
+        OrdreFabrication of = getOfEntityById(dto.getId());
 
         BigDecimal newQuantite = dto.getQuantiteCible() != null ? dto.getQuantiteCible() : of.getQuantiteCible();
         UUID newProjectId = dto.getProjectId() != null ? dto.getProjectId() : (of.getProjet() != null ? of.getProjet().getId() : null);
@@ -268,6 +276,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
 
         double sumExisting = projet.getOrdresFabrication().stream()
+                .filter(o -> !Boolean.TRUE.equals(o.getDeleted()))
                 .filter(o -> currentOfId == null || !o.getId().equals(currentOfId))
                 .mapToDouble(o -> o.getQuantiteCible().doubleValue())
                 .sum();
@@ -279,8 +288,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto demarrerOF(UUID id) {
-        OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+        OrdreFabrication of = getOfEntityById(id);
 
         if (of.getStatut() != StatutOF.PLANIFIE && of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Impossible de demarrer un OF avec le statut : " + of.getStatut());
@@ -341,8 +349,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto mettreEnPause(UUID id) {
-        OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+        OrdreFabrication of = getOfEntityById(id);
 
         if (of.getStatut() != StatutOF.EN_COURS) {
             throw new RuntimeException("Seul un OF en cours peut etre mis en pause");
@@ -354,8 +361,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto reprendreOF(UUID id) {
-        OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+        OrdreFabrication of = getOfEntityById(id);
 
         if (of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Seul un OF en pause peut etre repris");
@@ -370,8 +376,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto cloturerOF(UUID id) {
-        OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+        OrdreFabrication of = getOfEntityById(id);
 
         if (of.getStatut() != StatutOF.EN_COURS && of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Seul un OF en cours ou en pause peut etre cloture");
@@ -416,8 +421,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto saisirProduction(UUID id, SaisieProductionDto dto) {
-        OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+        OrdreFabrication of = getOfEntityById(id);
 
         if (of.getStatut() != StatutOF.EN_COURS) {
             throw new RuntimeException("La saisie de production n'est possible que pour un OF en cours");
@@ -475,8 +479,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Transactional
     public OrdreFabricationDto ajusterConsommation(UUID id, AjustementConsommationDto ajustement) {
-        OrdreFabrication of = ofRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("OF non trouve avec l'id : " + id));
+        OrdreFabrication of = getOfEntityById(id);
 
         if (of.getStatut() != StatutOF.EN_COURS && of.getStatut() != StatutOF.EN_PAUSE) {
             throw new RuntimeException("Les ajustements de consommation sont autorises uniquement pour un OF en cours ou en pause");
@@ -771,6 +774,19 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         }
     }
 
+    @Transactional
+    public void supprimerOF(UUID id) {
+        OrdreFabrication of = getOfEntityById(id);
+        if (of.getStatut() != StatutOF.PLANIFIE) {
+            throw new RuntimeException("Impossible de supprimer un OF avec le statut : " + of.getStatut());
+        }
+        if (of.getProjet() == null && of.getLignes() != null && !of.getLignes().isEmpty()) {
+            rollbackInventoryReservations(aggregateRoundedNeeds(of.getLignes()));
+        }
+        of.setDeleted(true);
+        ofRepository.save(of);
+    }
+
     private OrdreFabricationDto convertToDto(OrdreFabrication of) {
         OrdreFabricationDto dto = modelMapper.map(of, OrdreFabricationDto.class);
         try {
@@ -874,17 +890,22 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     @Override
     @Transactional(readOnly = true)
     public QrResolveResponse resolve(String publicCode) {
-        OrdreFabrication entity = ofRepository.findByQrHex(publicCode)
-                .orElseThrow(() -> new EntityNotFoundException("OF non trouve pour le code : " + publicCode));
+        UUID tenantId = TenantContext.getCurrentTenant();
+        Optional<OrdreFabrication> entity = (tenantId == null)
+                ? ofRepository.findByQrHexIgnoreCaseAndIsDeletedFalse(publicCode)
+                : ofRepository.findByQrHexIgnoreCaseAndTenantIdAndIsDeletedFalse(publicCode, tenantId);
+
+        OrdreFabrication of = entity.orElseThrow(() ->
+                new EntityNotFoundException("OF non trouve pour le code : " + publicCode));
 
         QrResolveResponse response = new QrResolveResponse();
         response.setEntityType("OF");
         response.setPublicCode(publicCode);
-        response.setEntityId(entity.getId().toString());
-        response.setLabel(entity.getCode());
-        response.setStatus(entity.getStatut().name());
+        response.setEntityId(of.getId().toString());
+        response.setLabel(of.getCode());
+        response.setStatus(of.getStatut().name());
         response.setMobileRoute("/of/detail");
-        response.setData(convertToDto(entity));
+        response.setData(convertToDto(of));
         return response;
     }
 }

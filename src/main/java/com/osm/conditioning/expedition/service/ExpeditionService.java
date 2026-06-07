@@ -475,7 +475,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     /* ──────────────────────── PRIVATE HELPERS ──────────────────────── */
 
     private void validateOfBelongsToProject(UUID ofId, UUID projectId) {
-        OrdreFabrication of = ofRepository.findById(ofId).orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
+        OrdreFabrication of = getOfEntityById(ofId);
 
         if (of.getProjet() == null || of.getProjet().getId() == null) {
             throw new IllegalArgumentException("L'ordre de fabrication n'est rattache a aucun projet");
@@ -597,8 +597,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     }
 
     private OrdreFabrication assignOrValidateOfProject(UUID ofId, Projet project) {
-        OrdreFabrication of = ofRepository.findById(ofId)
-                .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
+        OrdreFabrication of = getOfEntityById(ofId);
 
         if (project == null || project.getId() == null) {
             throw new IllegalArgumentException("Projet expedition invalide");
@@ -619,6 +618,11 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     private Expedition findExpedition(UUID expeditionId) {
         return expeditionRepository.findByIdAndIsDeletedFalse(expeditionId)
                 .orElseThrow(() -> new EntityNotFoundException("Expedition introuvable : " + expeditionId));
+    }
+
+    private OrdreFabrication getOfEntityById(UUID ofId) {
+        return ofRepository.findByIdAndIsDeletedFalse(ofId)
+                .orElseThrow(() -> new EntityNotFoundException("Ordre de fabrication introuvable : " + ofId));
     }
 
     private int sumAllocatedQuantityForOf(UUID ofId, UUID currentExpeditionId) {

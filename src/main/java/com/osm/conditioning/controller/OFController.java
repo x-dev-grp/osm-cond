@@ -143,6 +143,17 @@ public class OFController extends BaseControllerImpl<OrdreFabrication, OrdreFabr
         }
     }
 
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponse<Void>> supprimerOF(@PathVariable UUID id) {
+        try {
+            ofService.supprimerOF(id);
+            return ResponseEntity.ok(new ApiResponse<>(true, "OF supprime", null));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        }
+    }
+
  //-------------QRCode---------//
     @GetMapping("/{id}/qr-image")
     public ResponseEntity<byte[]> getQrImage(@PathVariable UUID id) {

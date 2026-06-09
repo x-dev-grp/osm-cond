@@ -29,7 +29,6 @@ public class LabelSource extends BaseEntity {
 
     private String sourceBusinessKey;
 
-    @Lob
     @Column(nullable = false, columnDefinition = "TEXT")
     private String snapshotJson;
 }

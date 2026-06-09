@@ -24,7 +24,7 @@ public class ProjetProduit extends BaseEntity implements Serializable {
     @Column(name = "product_id", nullable = false)
     private UUID productId;
 
-    @Column(name = "bom_id", nullable = false)
+    @Column(name = "bom_id")
     private UUID bomId;
 
     @Column(name = "quantite_cible", nullable = false)

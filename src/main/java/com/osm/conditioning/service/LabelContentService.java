@@ -305,14 +305,6 @@ public class LabelContentService {
         return labelContentRepository.save(labelContent);
     }
 
-    private ProduitFinalDto loadPackaging(UUID packagingId) {
-        try {
-            return clientInventaire.getProduitFinalById(packagingId);
-        } catch (Exception ignored) {
-            throw new EntityNotFoundException("Packaging introuvable pour l'id: " + packagingId);
-        }
-    }
-
     private void prepareLabelContent(
             LabelContent labelContent,
             StorageUnitDto storageUnit,
@@ -967,34 +959,6 @@ public class LabelContentService {
     private void validateNotBlank(List<LabelValidationIssueDto> issues, String value, String field, String message) {
         if (isBlank(value)) {
             issues.add(new LabelValidationIssueDto(field, message, true));
-        }
-    }
-
-    private boolean claimSupported(LabelContent labelContent, LabelClaimType claimType) {
-        switch (claimType) {
-            case MADE_IN_TUNISIA:
-                return DEFAULT_ORIGIN_COUNTRY.equalsIgnoreCase(
-                        Optional.ofNullable(labelContent.getOriginCountry()).orElse(""));
-
-            case BIO:
-                if (labelContent.getCertifications() == null)
-                    return false;
-                List<String> bioKeys = List.of("BIO", "BIOLOGIQUE", "ORGANIC", "ECOCERT");
-                return labelContent.getCertifications().stream()
-                        .anyMatch(name -> bioKeys.stream().anyMatch(key -> name.toUpperCase().contains(key)));
-
-            case COLD_EXTRACTION:
-                return Optional.ofNullable(labelContent.getExtractionMethod())
-                        .orElse("")
-                        .toLowerCase(Locale.ROOT)
-                        .contains("froid");
-
-            case PRIVATE_LABEL:
-                return !isBlank(labelContent.getResponsibleName());
-
-            case OTHER:
-            default:
-                return false;
         }
     }
 

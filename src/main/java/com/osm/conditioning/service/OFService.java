@@ -8,8 +8,10 @@ import com.osm.conditioning.model.LigneOF;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.projet.entity.ProjetReservation;
 import com.osm.conditioning.projet.repository.ProjetRepository;
+import com.osm.conditioning.repository.LabelContentRepository;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
 import com.xdev.communicator.models.shared.ApiResponse;
+import com.xdev.communicator.models.enums.LabelContentStatus;
 import com.xdev.communicator.models.shared.StorageUnitDto;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.models.Action;
@@ -50,6 +52,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     @Autowired
     private ProjetRepository projetRepository;
+
+    @Autowired
+    private LabelContentRepository labelContentRepository;
 
     public OFService(BaseRepository<OrdreFabrication> repository,
                      CodeGenerator codeGenerator,
@@ -168,6 +173,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         if (product == null) {
             throw new RuntimeException("Produit non trouve avec l'id : " + dto.getProductId());
         }
+        ensureProductHasFinalLabel(dto.getProductId());
 
         BOMDto bom = clientInventaire.getBomById(dto.getBomId());
         if (bom == null) {
@@ -389,11 +395,6 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             BigDecimal quantiteConsommee = ligne.getQuantiteReelle() != null ? ligne.getQuantiteReelle() : ligne.getQuantiteTheorique();
 
             if (quantiteConsommee != null && quantiteConsommee.compareTo(BigDecimal.ZERO) > 0) {
-                if (of.getProjet() != null) {
-                    decrementProjectReservation(of, ligne.getArticleId(), quantiteConsommee.doubleValue());
-                    continue;
-                }
-
                 try {
                     Map<String, Object> payload = new HashMap<>();
                     payload.put("quantite", com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee));
@@ -401,7 +402,13 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                     payload.put("referenceType", "OF");
                     payload.put("referenceId", of.getId() != null ? of.getId().toString() : null);
 
-                    consumeStandaloneOfStock(ligne.getArticleId(), payload, com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee));
+                    int quantity = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee);
+                    if (of.getProjet() != null) {
+                        consumeProjectOfStock(of, ligne.getArticleId(), payload, quantity);
+                        continue;
+                    }
+
+                    consumeStandaloneOfStock(ligne.getArticleId(), payload, quantity);
                 } catch (Exception e) {
                     throw new RuntimeException("Erreur lors de la sortie de stock pour l'article " + ligne.getArticleId() + " : " + e.getMessage(), e);
                 }
@@ -495,10 +502,15 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         int quantiteDemandee = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ajustement.getQuantiteReelle());
         if (of.getProjet() != null) {
-            int quantiteReserved = getProjectReservedQuantity(of, ajustement.getArticleId());
-            if (quantiteDemandee > quantiteReserved) {
-                throw new RuntimeException("La quantite ajustee depasse le stock reserve du projet pour l'article : "
-                        + resolveArticleLabel(ajustement.getArticleId()));
+            int reservedQuantity = getProjectReservedQuantity(of, ajustement.getArticleId());
+            int extraQuantity = Math.max(0, quantiteDemandee - reservedQuantity);
+            if (extraQuantity > 0) {
+                StockSecDto stock = getOrCreateStockForArticle(ajustement.getArticleId());
+                int availableQuantity = stock.getQuantiteDisponible() != null ? stock.getQuantiteDisponible() : 0;
+                if (extraQuantity > availableQuantity) {
+                    throw new RuntimeException("La quantite ajustee depasse le stock reserve et disponible pour l'article : "
+                            + resolveArticleLabel(ajustement.getArticleId()));
+                }
             }
         } else {
             StockSecDto stock;
@@ -510,7 +522,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
             int quantiteReservee = stock != null && stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
             int quantiteDisponible = stock != null && stock.getQuantiteDisponible() != null ? stock.getQuantiteDisponible() : 0;
-            int quantiteUtilisable = quantiteReservee >= quantiteDemandee ? quantiteReservee : quantiteDisponible;
+            int quantiteUtilisable = quantiteReservee + quantiteDisponible;
             if (quantiteDemandee > quantiteUtilisable) {
                 throw new RuntimeException("La quantite ajustee depasse le stock disponible pour cet article");
             }
@@ -536,6 +548,25 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                         .mapToInt(com.osm.conditioning.util.InventoryQuantityUtil::ceilToInt)
                         .sum())
                 .orElse(0);
+    }
+
+    private void ensureProductHasFinalLabel(UUID productId) {
+        if (productId == null || !hasFinalLabel(productId)) {
+            throw new RuntimeException("Etiquette finalisee obligatoire avant creation de l'OF pour le produit : " + productId);
+        }
+    }
+
+    private boolean hasFinalLabel(UUID productId) {
+        return labelContentRepository.findAllByProductIdAndIsDeletedFalse(productId).stream()
+                .anyMatch(this::isFinalLabel)
+                || labelContentRepository.findAllByPackagingIdAndIsDeletedFalse(productId).stream()
+                .anyMatch(this::isFinalLabel);
+    }
+
+    private boolean isFinalLabel(com.osm.conditioning.model.LabelContent labelContent) {
+        return labelContent.getStatus() == LabelContentStatus.FINALIZED
+                && labelContent.getFinalPayloadJson() != null
+                && !labelContent.getFinalPayloadJson().isBlank();
     }
 
     private List<String> findReservedStockRupturesFromMaterialNeeds(UUID bomId, double productionQuantity) {
@@ -748,14 +779,35 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
     private void consumeStandaloneOfStock(UUID articleId, Map<String, Object> payload, int quantity) {
         StockSecDto stock = getOrCreateStockForArticle(articleId);
-        int reservedQuantity = stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+        int reservedQuantity = Math.min(quantity, stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0);
 
-        if (reservedQuantity >= quantity) {
+        if (reservedQuantity > 0) {
+            payload.put("quantite", reservedQuantity);
             clientInventaire.consommerReservation(articleId, payload);
-            return;
         }
 
-        clientInventaire.sortieStock(articleId, payload);
+        int extraQuantity = quantity - reservedQuantity;
+        if (extraQuantity > 0) {
+            payload.put("quantite", extraQuantity);
+            payload.put("motif", payload.get("motif") + " (extra non reserve)");
+            clientInventaire.sortieStock(articleId, payload);
+        }
+    }
+
+    private void consumeProjectOfStock(OrdreFabrication of, UUID articleId, Map<String, Object> payload, int quantity) {
+        int reservedQuantity = Math.min(quantity, getProjectReservedQuantity(of, articleId));
+        if (reservedQuantity > 0) {
+            payload.put("quantite", reservedQuantity);
+            clientInventaire.consommerReservation(articleId, payload);
+            decrementProjectReservation(of, articleId, reservedQuantity);
+        }
+
+        int extraQuantity = quantity - reservedQuantity;
+        if (extraQuantity > 0) {
+            payload.put("quantite", extraQuantity);
+            payload.put("motif", payload.get("motif") + " (extra non reserve)");
+            clientInventaire.sortieStock(articleId, payload);
+        }
     }
 
     private StockSecDto getOrCreateStockForArticle(UUID articleId) {

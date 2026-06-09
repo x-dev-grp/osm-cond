@@ -8,7 +8,6 @@ import com.osm.conditioning.dto.ArticleSecDto;
 import com.osm.conditioning.dto.BOMDto;
 import com.osm.conditioning.dto.BomLineDto;
 import com.osm.conditioning.dto.analytics.*;
-import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.model.QCResult;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
 import com.osm.conditioning.repository.QCResultRepository;
@@ -264,20 +263,4 @@ public class AnalyticsService {
         return dto;
     }
 
-    private OfYieldDto mapToYieldDto(OrdreFabrication of) {
-        OfYieldDto dto = new OfYieldDto();
-        dto.setOfCode(of.getCode());
-        dto.setStatut(of.getStatut() != null ? of.getStatut().name() : "INCONNU");
-        dto.setSkuId(of.getProductId());
-        dto.setQuantiteCible(of.getQuantiteCible());
-        dto.setQuantiteBonne(of.getQuantiteBonne() != null ? of.getQuantiteBonne() : BigDecimal.ZERO);
-        if (dto.getQuantiteCible() != null && dto.getQuantiteCible().compareTo(BigDecimal.ZERO) > 0) {
-            dto.setYieldPercentage(dto.getQuantiteBonne()
-                    .multiply(new BigDecimal(100))
-                    .divide(dto.getQuantiteCible(), 2, RoundingMode.HALF_UP));
-        } else {
-            dto.setYieldPercentage(BigDecimal.ZERO);
-        }
-        return dto;
-    }
 }

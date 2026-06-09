@@ -12,10 +12,13 @@ import com.osm.conditioning.projet.entity.Client;
 import com.osm.conditioning.projet.entity.Projet;
 import com.osm.conditioning.projet.entity.ProjetProduit;
 import com.osm.conditioning.projet.entity.ProjetReservation;
+import com.osm.conditioning.projet.enums.TypeEmballage;
 import com.osm.conditioning.projet.repository.ClientRepository;
 import com.osm.conditioning.projet.repository.ProjetRepository;
+import com.osm.conditioning.repository.LabelContentRepository;
 import com.osm.conditioning.shipping.service.ShippingInfoService;
 
+import com.xdev.communicator.models.enums.LabelContentStatus;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
@@ -49,6 +52,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     private final ClientService clientService;
     private final ClientRepository clientRepository;
     private final clientInventaire clientInventaire;
+    private final LabelContentRepository labelContentRepository;
 
     public ProjetService(
             BaseRepository<Projet> repository,
@@ -58,7 +62,8 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             ShippingInfoService shippingInfoService,
             ClientService clientService,
             ClientRepository clientRepository,
-            clientInventaire clientInventaire
+            clientInventaire clientInventaire,
+            LabelContentRepository labelContentRepository
     ) {
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
@@ -66,10 +71,10 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         this.shippingInfoService = shippingInfoService;
         this.clientRepository = clientRepository;
         this.clientInventaire = clientInventaire;
+        this.labelContentRepository = labelContentRepository;
     }
 
     @Override
-    @Transactional(readOnly = true)
     public List<ProjetDto> findAll() {
         return projetRepository.findAllByTenantIdAndIsDeletedFalse(TenantContext.getCurrentTenant())
                 .stream()
@@ -217,6 +222,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         projet.setClient(client);
 
         applyBusinessFields(projet, dto);
+        ensureProjectProductsHaveFinalLabels(projet);
         calculateAndSetReservations(projet);
 
         UUID tenantId = TenantContext.getCurrentTenant();
@@ -256,6 +262,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         projet.setClient(client);
 
         applyBusinessFields(projet, dto);
+        ensureProjectProductsHaveFinalLabels(projet);
         calculateAndSetReservations(projet);
 
         Projet saved = projetRepository.save(projet);
@@ -374,6 +381,9 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         if (dto.getProduits() != null) {
             projet.getProduits().clear();
             for (ProjetProduitDto ppDto : dto.getProduits()) {
+                if (dto.getTypeEmballage() != TypeEmballage.VRAC && ppDto.getBomId() == null) {
+                    throw new IllegalArgumentException("La BOM est obligatoire pour un projet non VRAC");
+                }
                 ProjetProduit pp = new ProjetProduit();
                 pp.setProjet(projet);
                 pp.setProductId(ppDto.getProductId());
@@ -382,6 +392,35 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 projet.getProduits().add(pp);
             }
         }
+    }
+
+    private void ensureProjectProductsHaveFinalLabels(Projet projet) {
+        if (projet.getProduits() == null || projet.getProduits().isEmpty()) {
+            throw new IllegalArgumentException("Au moins un produit est obligatoire pour creer un projet");
+        }
+
+        for (ProjetProduit produit : projet.getProduits()) {
+            UUID productId = produit.getProductId();
+            if (productId == null) {
+                throw new IllegalArgumentException("Le produit est obligatoire pour chaque ligne projet");
+            }
+            if (!hasFinalLabel(productId)) {
+                throw new IllegalStateException("Etiquette finalisee obligatoire avant creation du projet pour le produit : " + productId);
+            }
+        }
+    }
+
+    private boolean hasFinalLabel(UUID productId) {
+        return labelContentRepository.findAllByProductIdAndIsDeletedFalse(productId).stream()
+                .anyMatch(this::isFinalLabel)
+                || labelContentRepository.findAllByPackagingIdAndIsDeletedFalse(productId).stream()
+                .anyMatch(this::isFinalLabel);
+    }
+
+    private boolean isFinalLabel(com.osm.conditioning.model.LabelContent labelContent) {
+        return labelContent.getStatus() == LabelContentStatus.FINALIZED
+                && labelContent.getFinalPayloadJson() != null
+                && !labelContent.getFinalPayloadJson().isBlank();
     }
 
     private void calculateAndSetReservations(Projet projet) {

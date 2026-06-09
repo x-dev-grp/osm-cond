@@ -1,0 +1,1 @@
+ALTER TABLE projet_produit MODIFY COLUMN bom_id BINARY(16) NULL;

@@ -48,9 +48,21 @@ public class ProjetController extends BaseControllerImpl<Projet, ProjetDto, Proj
     }
 
     @PostMapping("/create")
-    public ResponseEntity<ProjetDto> createProjetManual(@Valid @RequestBody ProjetDto dto) {
-        ProjetDto created = projetService.create(dto);
-        return new ResponseEntity<>(attachPermittedActions(created), HttpStatus.CREATED);
+    public ResponseEntity<ApiSingleResponse<Projet, ProjetDto>> createProjetManual(@Valid @RequestBody ProjetDto dto) {
+        try {
+            ProjetDto created = projetService.create(dto);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(new ApiSingleResponse<>(true, "Projet cree avec succes", attachPermittedActions(created)));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest()
+                    .body(new ApiSingleResponse<>(false, e.getMessage(), null));
+        } catch (EntityNotFoundException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ApiSingleResponse<>(false, e.getMessage(), null));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiSingleResponse<>(false, "Erreur interne lors de la creation du projet", null));
+        }
     }
 
     @GetMapping("/code/{code}")

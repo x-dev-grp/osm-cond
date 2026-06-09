@@ -20,8 +20,11 @@ import com.osm.conditioning.expedition.repository.ExpeditionArticleRepository;
 import com.osm.conditioning.expedition.repository.ExpeditionRepository;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.projet.entity.Projet;
+import com.osm.conditioning.projet.entity.ProjetProduit;
 import com.osm.conditioning.projet.repository.ProjetRepository;
+import com.osm.conditioning.repository.LabelContentRepository;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
+import com.xdev.communicator.models.enums.LabelContentStatus;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.CodeGenerator;
 import com.xdev.xdevbase.qr.model.QrCodeInfo;
@@ -57,6 +60,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     private final clientProductionStorage productionStorageClient;
     private final OrdreFabricationRepository ofRepository;
     private final TraceabilityService traceabilityService;
+    private final LabelContentRepository labelContentRepository;
 
     public ExpeditionService(
             BaseRepository<Expedition> repository,
@@ -68,7 +72,8 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
             clientInventaire inventaireClient,
             clientProductionStorage productionStorageClient,
             OrdreFabricationRepository ofRepository,
-            TraceabilityService traceabilityService
+            TraceabilityService traceabilityService,
+            LabelContentRepository labelContentRepository
     ) {
         super(repository, codeGenerator, modelMapper);
         this.expeditionRepository = expeditionRepository;
@@ -78,6 +83,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         this.productionStorageClient = productionStorageClient;
         this.ofRepository = ofRepository;
         this.traceabilityService = traceabilityService;
+        this.labelContentRepository = labelContentRepository;
     }
 
     /* ──────────────────────── READ ──────────────────────── */
@@ -156,6 +162,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
                 .orElseThrow(() -> new EntityNotFoundException("Projet introuvable : " + request.getProjetId()));
 
         ensureProjectAcceptsNewExpedition(projet);
+        ensureProjectProductsHaveFinalLabels(projet);
 
         if (projet.getClient() == null || projet.getClient().getId() == null) {
             throw new IllegalStateException("Le projet n'a pas de client exploitable pour l'expedition");
@@ -277,6 +284,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         if (expedition.getLines().isEmpty()) {
             throw new IllegalStateException("Impossible de passer READY sans lignes");
         }
+        ensureProjectProductsHaveFinalLabels(expedition.getProjet());
 
         // Validate cumulative stock for all lines
         validateExpeditionStock(expedition);
@@ -296,6 +304,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         }
 
         traceabilityService.assertTraceabilityComplete(expedition);
+        ensureProjectProductsHaveFinalLabels(expedition.getProjet());
 
         expedition.setStatus(ExpeditionStatus.VALIDATED);
         expedition.setValidatedAt(LocalDateTime.now());
@@ -314,6 +323,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         if (expedition.getStatus() != ExpeditionStatus.VALIDATED) {
             throw new IllegalStateException("Le shipping exige une expedition VALIDATED");
         }
+        ensureProjectProductsHaveFinalLabels(expedition.getProjet());
 
         expedition.setStatus(ExpeditionStatus.SHIPPED);
         expedition.setShippedAt(LocalDateTime.now());
@@ -473,18 +483,6 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
     }
 
     /* ──────────────────────── PRIVATE HELPERS ──────────────────────── */
-
-    private void validateOfBelongsToProject(UUID ofId, UUID projectId) {
-        OrdreFabrication of = getOfEntityById(ofId);
-
-        if (of.getProjet() == null || of.getProjet().getId() == null) {
-            throw new IllegalArgumentException("L'ordre de fabrication n'est rattache a aucun projet");
-        }
-
-        if (!Objects.equals(of.getProjet().getId(), projectId)) {
-            throw new IllegalArgumentException("L'ordre de fabrication n'appartient pas au projet de l'expedition");
-        }
-    }
 
     private void validateExpeditionStock(Expedition expedition) {
         Map<UUID, Integer> articleQuantities = new HashMap<>();
@@ -792,6 +790,32 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
         if (isCompletedProjectStatus(projet.getStatut()) || isProjectFullyDelivered(projet)) {
             throw new IllegalStateException("Projet deja livre. Impossible de creer une nouvelle expedition.");
         }
+    }
+
+    private void ensureProjectProductsHaveFinalLabels(Projet projet) {
+        if (projet == null || projet.getProduits() == null || projet.getProduits().isEmpty()) {
+            throw new IllegalStateException("Projet sans produit: expedition impossible.");
+        }
+
+        for (ProjetProduit produit : projet.getProduits()) {
+            UUID productId = produit.getProductId();
+            if (productId == null || !hasFinalLabel(productId)) {
+                throw new IllegalStateException("Etiquette finalisee obligatoire avant expedition pour le produit : " + productId);
+            }
+        }
+    }
+
+    private boolean hasFinalLabel(UUID productId) {
+        return labelContentRepository.findAllByProductIdAndIsDeletedFalse(productId).stream()
+                .anyMatch(this::isFinalLabel)
+                || labelContentRepository.findAllByPackagingIdAndIsDeletedFalse(productId).stream()
+                .anyMatch(this::isFinalLabel);
+    }
+
+    private boolean isFinalLabel(com.osm.conditioning.model.LabelContent labelContent) {
+        return labelContent.getStatus() == LabelContentStatus.FINALIZED
+                && labelContent.getFinalPayloadJson() != null
+                && !labelContent.getFinalPayloadJson().isBlank();
     }
 
     private void ensureProjectAcceptsAdditionalExpeditionLine(Projet projet) {

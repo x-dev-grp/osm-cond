@@ -74,7 +74,6 @@ public class Expedition extends BaseEntity {
     @Column(length = 30)
     private String incoterm;
 
-    @Lob
     @Column(name = "traceability_snapshot_json", columnDefinition = "TEXT")
     private String traceabilitySnapshotJson;
 

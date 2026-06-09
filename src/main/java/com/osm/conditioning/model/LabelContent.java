@@ -88,7 +88,6 @@ public class LabelContent extends BaseEntity {
     @Column(name = "marketing_claim")
     private List<String> marketingClaims = new ArrayList<>();
 
-    @Lob
     @Column(name = "final_payload_json", columnDefinition = "TEXT")
     private String finalPayloadJson;
 

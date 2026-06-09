@@ -22,7 +22,6 @@ public class Certification extends BaseEntity {
 
     private String issuingBody;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String logoData;
 

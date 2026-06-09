@@ -843,7 +843,10 @@ public class LabelContentService {
         payload.put("qualityGrade", labelContent.getQualityGrade());
         payload.put("extractionMethod", labelContent.getExtractionMethod());
         payload.put("sensoryProfile", labelContent.getSensoryProfile());
-        payload.put("postFiltrationQualityControls", resolvePostFiltrationQualityControls(labelContent));
+        Map<String, String> postFiltrationQualityControls = resolvePostFiltrationQualityControls(labelContent);
+        payload.put("postFiltrationQualityControls", postFiltrationQualityControls);
+        payload.put("qualityControls", buildStructuredQualityControls(postFiltrationQualityControls));
+        payload.put("oilCompositionEstimate", buildOilCompositionEstimate(postFiltrationQualityControls, labelContent.getNetQuantity()));
 
         // Merge certifications and marketing claims for the label display
         Set<String> allCerts = new LinkedHashSet<>();
@@ -856,6 +859,26 @@ public class LabelContentService {
         payload.put("marketingClaims", labelContent.getMarketingClaims());
         payload.put("status", labelContent.getStatus().name());
         payload.put("publicCode", labelContent.getQrHex());
+
+        payload.put("language", labelContent.getLanguage() != null ? labelContent.getLanguage().name() : null);
+        payload.put("labelCategory",
+                labelContent.getLabelCategory() != null ? labelContent.getLabelCategory().name() : null);
+        payload.put("packagingDate",
+                labelContent.getPackagingDate() != null ? labelContent.getPackagingDate().toString() : null);
+        payload.put("qualityGradeLabel", officialNameFromString(labelContent.getQualityGrade()));
+        payload.put("claimTypes", labelContent.getClaimTypes() != null
+                ? labelContent.getClaimTypes().stream().map(Enum::name).sorted().toList()
+                : List.of());
+        payload.put("labelId", labelContent.getId());
+        payload.put("lotId", labelContent.getLotId());
+        payload.put("packagingId", labelContent.getPackagingId());
+        payload.put("traceabilityLotId", labelContent.getTraceabilityLotId());
+        payload.put("filtrationOperationId", labelContent.getFiltrationOperationId());
+        payload.put("productId", labelContent.getProductId());
+        if (labelContent.getFinalizedAt() != null) {
+            payload.put("finalizedAt", labelContent.getFinalizedAt().toString());
+        }
+        payload.put("finalizedBy", labelContent.getFinalizedBy());
 
         // Enrich certifications with logos
         List<Map<String, String>> certDetails = new ArrayList<>();
@@ -925,6 +948,186 @@ public class LabelContentService {
         }
 
         return Map.of();
+    }
+
+    private List<Map<String, String>> buildStructuredQualityControls(Map<String, String> controls) {
+        if (controls == null || controls.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, String>> entries = new ArrayList<>();
+        for (Map.Entry<String, String> entry : controls.entrySet()) {
+            if (isCompositionQcKey(entry.getKey())) {
+                continue;
+            }
+            Map<String, String> item = new LinkedHashMap<>();
+            item.put("key", entry.getKey());
+            item.put("label", entry.getKey());
+            item.put("value", entry.getValue());
+            entries.add(item);
+        }
+        return entries;
+    }
+
+    private List<Map<String, Object>> buildOilCompositionEstimate(Map<String, String> controls, String netQuantity) {
+        Map<String, Map<String, Object>> measured = new LinkedHashMap<>();
+
+        if (controls != null) {
+            for (Map.Entry<String, String> entry : controls.entrySet()) {
+                String compositionKey = resolveCompositionKey(entry.getKey());
+                if (compositionKey == null) {
+                    continue;
+                }
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("key", compositionKey);
+                item.put("label", compositionLabel(compositionKey));
+                item.put("value", entry.getValue());
+                item.put("per100ml", entry.getValue());
+                item.put("source", "measured");
+                measured.put(compositionKey, item);
+            }
+        }
+
+        List<Map<String, Object>> estimate = new ArrayList<>();
+        for (String key : List.of(
+                "lipides",
+                "acides_gras_satures",
+                "acides_gras_mono",
+                "acides_gras_poly",
+                "vitamine_e",
+                "energie",
+                "glucides",
+                "proteines",
+                "sel")) {
+            if (measured.containsKey(key)) {
+                estimate.add(measured.get(key));
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("key", key);
+            item.put("label", compositionLabel(key));
+            item.put("value", referenceCompositionValue(key, netQuantity));
+            item.put("per100ml", referenceCompositionPer100ml(key));
+            item.put("source", "estimated");
+            estimate.add(item);
+        }
+
+        for (Map.Entry<String, Map<String, Object>> entry : measured.entrySet()) {
+            String measuredKey = entry.getKey();
+            if (estimate.stream().noneMatch(item -> measuredKey.equals(item.get("key")))) {
+                estimate.add(entry.getValue());
+            }
+        }
+
+        return estimate;
+    }
+
+    private boolean isCompositionQcKey(String key) {
+        return resolveCompositionKey(key) != null;
+    }
+
+    private String resolveCompositionKey(String key) {
+        if (isBlank(key)) {
+            return null;
+        }
+
+        String normalized = normalizeQcKey(key);
+        if (containsAny(normalized, "lipide", "lipid", "gras", "fat", "matiere grasse")) {
+            return "lipides";
+        }
+        if (containsAny(normalized, "sature", "saturated", "ag sature")) {
+            return "acides_gras_satures";
+        }
+        if (containsAny(normalized, "monoinsature", "monounsaturated", "ag mono")) {
+            return "acides_gras_mono";
+        }
+        if (containsAny(normalized, "polyinsature", "polyunsaturated", "ag poly")) {
+            return "acides_gras_poly";
+        }
+        if (containsAny(normalized, "vitamine e", "vitamin e", "tocopherol")) {
+            return "vitamine_e";
+        }
+        if (containsAny(normalized, "vitamine a", "vitamin a", "retinol")) {
+            return "vitamine_a";
+        }
+        if (containsAny(normalized, "vitamine d", "vitamin d")) {
+            return "vitamine_d";
+        }
+        if (containsAny(normalized, "vitamine k", "vitamin k")) {
+            return "vitamine_k";
+        }
+        if (containsAny(normalized, "polyphenol", "poly phenol")) {
+            return "polyphenols";
+        }
+        if (containsAny(normalized, "energie", "energy", "calorie", "kcal", "kj")) {
+            return "energie";
+        }
+        if (containsAny(normalized, "glucide", "carbohydrate", "carb")) {
+            return "glucides";
+        }
+        if (containsAny(normalized, "proteine", "protein")) {
+            return "proteines";
+        }
+        if (containsAny(normalized, "sel", "sodium", "salt")) {
+            return "sel";
+        }
+        return null;
+    }
+
+    private String compositionLabel(String key) {
+        return switch (key) {
+            case "lipides" -> "Lipides";
+            case "acides_gras_satures" -> "Acides gras saturés";
+            case "acides_gras_mono" -> "Acides gras monoinsaturés";
+            case "acides_gras_poly" -> "Acides gras polyinsaturés";
+            case "vitamine_e" -> "Vitamine E";
+            case "vitamine_a" -> "Vitamine A";
+            case "vitamine_d" -> "Vitamine D";
+            case "vitamine_k" -> "Vitamine K";
+            case "polyphenols" -> "Polyphénols";
+            case "energie" -> "Énergie";
+            case "glucides" -> "Glucides";
+            case "proteines" -> "Protéines";
+            case "sel" -> "Sel";
+            default -> key;
+        };
+    }
+
+    private String referenceCompositionPer100ml(String key) {
+        return switch (key) {
+            case "lipides" -> "100 g";
+            case "acides_gras_satures" -> "14 g";
+            case "acides_gras_mono" -> "73 g";
+            case "acides_gras_poly" -> "11 g";
+            case "vitamine_e" -> "14 mg";
+            case "energie" -> "824 kcal / 3389 kJ";
+            case "glucides", "proteines", "sel" -> "0 g";
+            default -> "-";
+        };
+    }
+
+    private String referenceCompositionValue(String key, String netQuantity) {
+        return referenceCompositionPer100ml(key);
+    }
+
+    private String normalizeQcKey(String value) {
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+    }
+
+    private boolean containsAny(String normalized, String... tokens) {
+        for (String token : tokens) {
+            if (normalized.contains(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Map<String, String> toStringMap(Object source) {

@@ -12,8 +12,6 @@ import com.osm.conditioning.repository.LabelContentRepository;
 import com.osm.conditioning.repository.LabelSourceRepository;
 import com.osm.conditioning.repository.LigneOFRepository;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
-import com.osm.conditioning.shipping.model.ShippingInfo;
-import com.osm.conditioning.shipping.repository.ShippingInfoRepository;
 import com.xdev.xdevbase.config.TenantContext;
 import com.xdev.xdevbase.qr.model.QrResolveResponse;
 import com.xdev.xdevbase.services.GlobalCodeSearchContributor;
@@ -33,7 +31,6 @@ public class GlobalSearch implements GlobalCodeSearchContributor {
     private final LabelSourceRepository labelSourceRepository;
     private final ProjetRepository projetRepository;
     private final ExpeditionRepository expeditionRepository;
-    private final ShippingInfoRepository shippingInfoRepository;
 
 
     public GlobalSearch(
@@ -42,8 +39,7 @@ public class GlobalSearch implements GlobalCodeSearchContributor {
             LigneOFRepository ligneOFRepository,
             LabelSourceRepository labelSourceRepository ,
             ProjetRepository projetRepository,
-            ExpeditionRepository expeditionRepository,
-            ShippingInfoRepository shippingInfoRepository
+            ExpeditionRepository expeditionRepository
     ) {
         this.ordreFabricationRepository = ordreFabricationRepository;
         this.labelContentRepository = labelContentRepository;
@@ -51,7 +47,6 @@ public class GlobalSearch implements GlobalCodeSearchContributor {
         this.labelSourceRepository = labelSourceRepository;
         this.projetRepository = projetRepository;
         this.expeditionRepository = expeditionRepository;
-        this.shippingInfoRepository = shippingInfoRepository;
     }
 
     @Override
@@ -77,11 +72,6 @@ public class GlobalSearch implements GlobalCodeSearchContributor {
         Optional<QrResolveResponse> expeditionMatch = resolveExpedition(normalized);
         if (expeditionMatch.isPresent()) {
             return expeditionMatch;
-        }
-
-        Optional<QrResolveResponse> shippingMatch = resolveShipping(normalized);
-        if (shippingMatch.isPresent()) {
-            return shippingMatch;
         }
 
         Optional<QrResolveResponse> labelMatch = resolveLabelContent(normalized, tenantId);
@@ -114,26 +104,6 @@ public class GlobalSearch implements GlobalCodeSearchContributor {
                 null
         ));
     }
-
-    private Optional<QrResolveResponse> resolveShipping(String code) {
-        Optional<ShippingInfo> entity = shippingInfoRepository.findByQrHexAndIsDeletedFalse(code);
-        if (entity.isEmpty()) {
-            entity = shippingInfoRepository.findByShippingNumberIgnoreCaseAndIsDeletedFalse(code);
-        }
-
-        return entity.map(shipping -> response(
-                "SHIPPING",
-                code,
-                shipping.getId(),
-                shipping.getShippingNumber(),
-                shipping.getStatus() != null ? shipping.getStatus().name() : null,
-                "/projets/detail",
-                shipping.getProjet() != null ? "/projets/detail/" + shipping.getProjet().getId() + "/shipping" : "/projets",
-                null
-        ));
-    }
-
-
 
     private Optional<QrResolveResponse> resolveOf(String code, UUID tenantId) {
         Optional<OrdreFabrication> entity = tenantId == null

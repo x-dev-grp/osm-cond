@@ -5,9 +5,12 @@ import com.osm.conditioning.dto.ArticleSecDto;
 import com.osm.conditioning.dto.BOMDto;
 import com.osm.conditioning.dto.BomLineDto;
 import com.osm.conditioning.dto.ProduitFinalDto;
+import com.osm.conditioning.dto.StockSecDto;
+import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.projet.dto.ClientDto;
 import com.osm.conditioning.projet.dto.ProjetDto;
 import com.osm.conditioning.projet.dto.ProjetProduitDto;
+import com.osm.conditioning.projet.dto.ProjetReservationDto;
 import com.osm.conditioning.projet.entity.Client;
 import com.osm.conditioning.projet.entity.Projet;
 import com.osm.conditioning.projet.entity.ProjetProduit;
@@ -16,7 +19,7 @@ import com.osm.conditioning.projet.enums.TypeEmballage;
 import com.osm.conditioning.projet.repository.ClientRepository;
 import com.osm.conditioning.projet.repository.ProjetRepository;
 import com.osm.conditioning.repository.LabelContentRepository;
-import com.osm.conditioning.shipping.service.ShippingInfoService;
+import com.osm.conditioning.util.InventoryQuantityUtil;
 
 import com.xdev.communicator.models.enums.LabelContentStatus;
 import com.xdev.xdevbase.config.TenantContext;
@@ -48,7 +51,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     private static final String ENTITY_TYPE = "PROJET";
 
     private final ProjetRepository projetRepository;
-    private final ShippingInfoService shippingInfoService;
     private final ClientService clientService;
     private final ClientRepository clientRepository;
     private final clientInventaire clientInventaire;
@@ -59,7 +61,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             CodeGenerator codeGenerator,
             ModelMapper modelMapper,
             ProjetRepository projetRepository,
-            ShippingInfoService shippingInfoService,
             ClientService clientService,
             ClientRepository clientRepository,
             clientInventaire clientInventaire,
@@ -68,7 +69,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         super(repository, codeGenerator, modelMapper);
         this.projetRepository = projetRepository;
         this.clientService = clientService;
-        this.shippingInfoService = shippingInfoService;
         this.clientRepository = clientRepository;
         this.clientInventaire = clientInventaire;
         this.labelContentRepository = labelContentRepository;
@@ -125,10 +125,16 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public ProjetDto findById(UUID id) {
         Projet projet = projetRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + id));
+
+        if (projet.getStatut() != null && STATUT_FAILED.equalsIgnoreCase(projet.getStatut().trim())) {
+            calculateAndSetReservations(projet);
+            projet = projetRepository.save(projet);
+        }
+
         return toDto(projet);
     }
 
@@ -240,8 +246,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
             saved = projetRepository.save(saved);
         }
-
-        shippingInfoService.ensureShippingInfoForProject(saved);
 
         return toDto(saved);
     }
@@ -417,7 +421,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
                 .anyMatch(this::isFinalLabel);
     }
 
-    private boolean isFinalLabel(com.osm.conditioning.model.LabelContent labelContent) {
+    private boolean isFinalLabel(LabelContent labelContent) {
         return labelContent.getStatus() == LabelContentStatus.FINALIZED
                 && labelContent.getFinalPayloadJson() != null
                 && !labelContent.getFinalPayloadJson().isBlank();
@@ -464,15 +468,18 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
             pr.setArticleId(entry.getKey());
             pr.setQuantiteReservee(entry.getValue());
 
-            int quantiteArrondie = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(entry.getValue());
+            int quantiteArrondie = InventoryQuantityUtil.ceilToInt(entry.getValue());
             try {
-                Map<String, Object> payload = new HashMap<>();
-                payload.put("quantite", quantiteArrondie);
-                clientInventaire.reserverStock(entry.getKey(), payload);
+                reserveProjectStock(entry.getKey(), quantiteArrondie, articleCache);
                 pr.setStatut("CONFIRMED");
                 confirmedReservations.put(entry.getKey(), quantiteArrondie);
             } catch (Exception e) {
-                System.err.println("Failed to reserve stock for article: " + entry.getKey() + " - " + e.getMessage());
+                System.err.println(
+                        "Failed to reserve stock for article "
+                                + describeArticle(entry.getKey(), articleCache)
+                                + " - "
+                                + resolveReservationErrorMessage(e)
+                );
                 pr.setStatut("FAILED");
                 hasFailure = true;
             }
@@ -647,6 +654,47 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         return null;
     }
 
+    private void reserveProjectStock(UUID articleId, int quantite, Map<UUID, ArticleSecDto> articleCache) {
+        StockSecDto stock = clientInventaire.getStockByArticle(articleId);
+        int disponible = stock != null && stock.getQuantiteDisponible() != null
+                ? stock.getQuantiteDisponible()
+                : 0;
+
+        if (disponible < quantite) {
+            throw new IllegalStateException(
+                    "Stock disponible insuffisant pour "
+                            + describeArticle(articleId, articleCache)
+                            + ". Disponible: "
+                            + disponible
+                            + ", requis: "
+                            + quantite
+            );
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("quantite", quantite);
+        clientInventaire.reserverStock(articleId, payload);
+    }
+
+    private String describeArticle(UUID articleId, Map<UUID, ArticleSecDto> articleCache) {
+        ArticleSecDto article = getArticleForReservation(articleId, articleCache);
+        if (article != null && article.getNom() != null && !article.getNom().isBlank()) {
+            return article.getNom() + " (" + articleId + ")";
+        }
+        return String.valueOf(articleId);
+    }
+
+    private String resolveReservationErrorMessage(Exception error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                return current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return "Erreur de reservation inconnue";
+    }
+
     private void rollbackReservations(Map<UUID, Integer> confirmedReservations) {
         for (Map.Entry<UUID, Integer> entry : confirmedReservations.entrySet()) {
             try {
@@ -671,7 +719,7 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
 
             try {
                 Map<String, Object> payload = new HashMap<>();
-                payload.put("quantite", com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(reservation.getQuantiteReservee()));
+                payload.put("quantite", InventoryQuantityUtil.ceilToInt(reservation.getQuantiteReservee()));
                 clientInventaire.annulerReservation(reservation.getArticleId(), payload);
                 reservation.setStatut("RELEASED");
             } catch (Exception e) {
@@ -734,9 +782,9 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         if (projet.getReservations() != null) {
-            List<com.osm.conditioning.projet.dto.ProjetReservationDto> rList = new ArrayList<>();
+            List<ProjetReservationDto> rList = new ArrayList<>();
             for (ProjetReservation pr : projet.getReservations()) {
-                com.osm.conditioning.projet.dto.ProjetReservationDto prDto = new com.osm.conditioning.projet.dto.ProjetReservationDto();
+                ProjetReservationDto prDto = new ProjetReservationDto();
                 prDto.setId(pr.getId());
                 prDto.setProjetId(projet.getId());
                 prDto.setArticleId(pr.getArticleId());
@@ -782,7 +830,6 @@ public class ProjetService extends BaseServiceImpl<Projet, ProjetDto, ProjetDto>
         }
 
         if (status == null
-                || "FAILED".equalsIgnoreCase(status)
                 || "PENDING".equalsIgnoreCase(status)
                 || "PRE-CALCULE".equalsIgnoreCase(status)) {
             return "CONFIRMED";

@@ -4,9 +4,6 @@ import com.osm.conditioning.expedition.model.ExpeditionArticle;
 import com.osm.conditioning.model.*;
 import com.osm.conditioning.projet.entity.Client;
 import com.osm.conditioning.projet.entity.Projet;
-import com.osm.conditioning.shipping.model.ShippingEvent;
-import com.osm.conditioning.shipping.model.ShippingInfo;
-import com.osm.conditioning.shipping.model.ShippingLine;
 import com.xdev.xdevbase.dtos.AuditDto;
 import com.osm.conditioning.expedition.model.Expedition;
 import jakarta.persistence.EntityManager;
@@ -43,10 +40,7 @@ public class AuditService {
                 Expedition.class,
                 ExpeditionArticle.class,
                 Projet.class,
-                Client.class,
-                ShippingInfo.class,
-                ShippingEvent.class,
-                ShippingLine.class
+                Client.class
         );
 
         auditedClasses.forEach(clazz -> {

@@ -1,5 +1,6 @@
 package com.osm.conditioning.projet.dto;
 
+import com.osm.conditioning.projet.entity.ProjetProduit;
 import com.xdev.xdevbase.dtos.BaseDto;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -8,7 +9,7 @@ import java.util.UUID;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-public class ProjetProduitDto extends BaseDto<com.osm.conditioning.projet.entity.ProjetProduit> {
+public class ProjetProduitDto extends BaseDto<ProjetProduit> {
     private UUID projetId;
     private UUID productId;
     private UUID bomId;

@@ -3,13 +3,20 @@ package com.osm.conditioning.service;
 import com.osm.conditioning.Enum.QualityStatus;
 import com.osm.conditioning.Enum.StatutOF;
 import com.osm.conditioning.client.clientInventaire;
+import com.osm.conditioning.client.clientProductionStorage;
 import com.osm.conditioning.dto.*;
+import com.osm.conditioning.expedition.dto.GenealogyDto;
+import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.LigneOF;
 import com.osm.conditioning.model.OrdreFabrication;
+import com.osm.conditioning.projet.entity.Projet;
+import com.osm.conditioning.projet.entity.ProjetProduit;
 import com.osm.conditioning.projet.entity.ProjetReservation;
 import com.osm.conditioning.projet.repository.ProjetRepository;
+import com.osm.conditioning.projet.service.ProjetService;
 import com.osm.conditioning.repository.LabelContentRepository;
 import com.osm.conditioning.repository.OrdreFabricationRepository;
+import com.osm.conditioning.util.InventoryQuantityUtil;
 import com.xdev.communicator.models.shared.ApiResponse;
 import com.xdev.communicator.models.enums.LabelContentStatus;
 import com.xdev.communicator.models.shared.StorageUnitDto;
@@ -45,10 +52,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     private clientInventaire clientInventaire;
 
     @Autowired
-    private com.osm.conditioning.client.clientProductionStorage productionStorageClient;
+    private clientProductionStorage productionStorageClient;
 
     @Autowired
-    private com.osm.conditioning.projet.service.ProjetService projetService;
+    private ProjetService projetService;
 
     @Autowired
     private ProjetRepository projetRepository;
@@ -133,8 +140,9 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             throw new RuntimeException("Le projet est obligatoire pour creer un OF");
         }
 
-        com.osm.conditioning.projet.entity.Projet projet = null;
+        Projet projet = null;
         if (dto.getProjectId() != null) {
+            projetService.ensureNotFailed(dto.getProjectId());
             projet = projetService.findByIdOrThrow(dto.getProjectId());
         }
 
@@ -142,7 +150,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         if (projet != null && dto.getProductId() == null) {
             if (projet.getProduits() != null && projet.getProduits().size() == 1) {
                 // Si le projet n'a qu'un seul produit, on l'hérite automatiquement
-                com.osm.conditioning.projet.entity.ProjetProduit seulProduit = projet.getProduits().get(0);
+                ProjetProduit seulProduit = projet.getProduits().get(0);
                 dto.setProductId(seulProduit.getProductId());
                 if (dto.getBomId() == null) {
                     dto.setBomId(seulProduit.getBomId());
@@ -226,12 +234,10 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
         Map<UUID, Integer> standaloneReservations = new LinkedHashMap<>();
         if (projet != null) {
-            List<String> ruptures = findReservedStockRupturesFromMaterialNeeds(bom.getId(), productionQuantity);
+            List<String> ruptures = findProjectReservationRuptures(projet.getId(), of.getLignes());
             if (!ruptures.isEmpty()) {
                 throw new RuntimeException("Stock reserve insuffisant pour creer l'OF : " + String.join(" ; ", ruptures));
             }
-            projet = clearFailedProjectStatusIfReservationsAreUsable(projet);
-            of.setProjet(projet);
         } else {
             standaloneReservations = reserveStandaloneOfStock(of.getLignes());
         }
@@ -265,7 +271,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         UUID newProjectId = dto.getProjectId() != null ? dto.getProjectId() : (of.getProjet() != null ? of.getProjet().getId() : null);
 
         if (newProjectId != null) {
-            com.osm.conditioning.projet.entity.Projet projet = projetService.findByIdOrThrow(newProjectId);
+            Projet projet = projetService.findByIdOrThrow(newProjectId);
             validateProjectQuantity(projet, newQuantite, of.getId());
         }
 
@@ -276,7 +282,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return super.update(dto);
     }
 
-    private void validateProjectQuantity(com.osm.conditioning.projet.entity.Projet projet, BigDecimal quantiteCible, UUID currentOfId) {
+    private void validateProjectQuantity(Projet projet, BigDecimal quantiteCible, UUID currentOfId) {
         if (projet == null) {
             return;
         }
@@ -303,14 +309,18 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         boolean projectMode = of.getProjet() != null;
 
         if (projectMode && of.getProjet() != null && of.getProjet().getId() != null) {
-            com.osm.conditioning.projet.entity.Projet projet = projetRepository
-                    .findByIdAndIsDeletedFalse(of.getProjet().getId())
-                    .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + of.getProjet().getId()));
-            double productionQuantity = of.getQuantiteCible() != null ? of.getQuantiteCible().doubleValue() : 0.0;
-            List<String> projectReservationRuptures = findReservedStockRupturesFromMaterialNeeds(of.getBomId(), productionQuantity);
+            UUID projectId = of.getProjet().getId();
+            projetService.ensureNotFailed(projectId);
+            List<String> projectReservationRuptures = findProjectReservationRuptures(projectId, of.getLignes());
             if (!projectReservationRuptures.isEmpty()) {
                 throw new RuntimeException("Stock reserve projet insuffisant pour demarrer l'OF : "
                         + String.join(" ; ", projectReservationRuptures));
+            }
+
+            List<String> inventoryRuptures = findProjectInventoryRuptures(projectId, of.getLignes());
+            if (!inventoryRuptures.isEmpty()) {
+                throw new RuntimeException("Stock inventaire insuffisant pour demarrer l'OF : "
+                        + String.join(" ; ", inventoryRuptures));
             }
         }
 
@@ -318,7 +328,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             List<String> ruptures = new ArrayList<>();
             for (LigneOF ligne : of.getLignes()) {
                 UUID articleId = ligne.getArticleId();
-                int besoin = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
+                int besoin = InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
 
                 StockSecDto stock;
                 try {
@@ -397,12 +407,12 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             if (quantiteConsommee != null && quantiteConsommee.compareTo(BigDecimal.ZERO) > 0) {
                 try {
                     Map<String, Object> payload = new HashMap<>();
-                    payload.put("quantite", com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee));
+                    payload.put("quantite", InventoryQuantityUtil.ceilToInt(quantiteConsommee));
                     payload.put("motif", "Consommation OF " + of.getCode());
                     payload.put("referenceType", "OF");
                     payload.put("referenceId", of.getId() != null ? of.getId().toString() : null);
 
-                    int quantity = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(quantiteConsommee);
+                    int quantity = InventoryQuantityUtil.ceilToInt(quantiteConsommee);
                     if (of.getProjet() != null) {
                         consumeProjectOfStock(of, ligne.getArticleId(), payload, quantity);
                         continue;
@@ -410,7 +420,13 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
 
                     consumeStandaloneOfStock(ligne.getArticleId(), payload, quantity);
                 } catch (Exception e) {
-                    throw new RuntimeException("Erreur lors de la sortie de stock pour l'article " + ligne.getArticleId() + " : " + e.getMessage(), e);
+                    throw new RuntimeException(
+                            "Erreur lors de la sortie de stock pour l'article "
+                                    + resolveArticleLabel(ligne.getArticleId())
+                                    + " : "
+                                    + resolveExceptionMessage(e),
+                            e
+                    );
                 }
             }
         }
@@ -461,7 +477,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             return;
         }
 
-        com.osm.conditioning.projet.entity.Projet projet = projetRepository.findByIdAndIsDeletedFalse(of.getProjet().getId())
+        Projet projet = projetRepository.findByIdAndIsDeletedFalse(of.getProjet().getId())
                 .orElse(null);
         if (projet == null || projet.getReservations() == null || projet.getReservations().isEmpty()) {
             return;
@@ -500,7 +516,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Article non trouve dans l'OF : " + ajustement.getArticleId()));
 
-        int quantiteDemandee = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ajustement.getQuantiteReelle());
+        int quantiteDemandee = InventoryQuantityUtil.ceilToInt(ajustement.getQuantiteReelle());
         if (of.getProjet() != null) {
             int reservedQuantity = getProjectReservedQuantity(of, ajustement.getArticleId());
             int extraQuantity = Math.max(0, quantiteDemandee - reservedQuantity);
@@ -545,7 +561,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                         .filter(reservation -> !"RELEASED".equalsIgnoreCase(reservation.getStatut()))
                         .filter(reservation -> !"CONSUMED".equalsIgnoreCase(reservation.getStatut()))
                         .mapToDouble(reservation -> reservation.getQuantiteReservee() == null ? 0d : reservation.getQuantiteReservee())
-                        .mapToInt(com.osm.conditioning.util.InventoryQuantityUtil::ceilToInt)
+                        .mapToInt(InventoryQuantityUtil::ceilToInt)
                         .sum())
                 .orElse(0);
     }
@@ -563,27 +579,36 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 .anyMatch(this::isFinalLabel);
     }
 
-    private boolean isFinalLabel(com.osm.conditioning.model.LabelContent labelContent) {
+    private boolean isFinalLabel(LabelContent labelContent) {
         return labelContent.getStatus() == LabelContentStatus.FINALIZED
                 && labelContent.getFinalPayloadJson() != null
                 && !labelContent.getFinalPayloadJson().isBlank();
     }
 
-    private List<String> findReservedStockRupturesFromMaterialNeeds(UUID bomId, double productionQuantity) {
+    private List<String> findProjectReservationRuptures(UUID projectId, List<LigneOF> lignes) {
         List<String> ruptures = new ArrayList<>();
-        List<MaterialNeedLineDto> needs = clientInventaire.getMaterialNeeds(bomId, productionQuantity);
+       Projet projet = projetRepository
+                .findByIdAndIsDeletedFalse(projectId)
+                .orElseThrow(() -> new EntityNotFoundException("Projet non trouve : " + projectId));
 
-        if (needs == null) {
-            return ruptures;
-        }
+        Map<UUID, Integer> requiredByArticle = aggregateRoundedNeeds(lignes);
+        Map<UUID, Integer> reservedByArticle = projet.getReservations().stream()
+                .filter(reservation -> "CONFIRMED".equalsIgnoreCase(reservation.getStatut()))
+                .filter(reservation -> reservation.getArticleId() != null)
+                .collect(Collectors.toMap(
+                        ProjetReservation::getArticleId,
+                        reservation -> InventoryQuantityUtil.ceilToInt(
+                                reservation.getQuantiteReservee()
+                        ),
+                        Integer::sum
+                ));
 
-        for (MaterialNeedLineDto line : needs) {
-            int besoin = line.getQuantityNeededRounded();
-            int reserve = line.getQuantiteReservee() != null ? line.getQuantiteReservee() : 0;
-
+        for (Map.Entry<UUID, Integer> entry : requiredByArticle.entrySet()) {
+            int besoin = entry.getValue();
+            int reserve = reservedByArticle.getOrDefault(entry.getKey(), 0);
             if (reserve < besoin) {
                 ruptures.add(String.format("Article %s : besoin = %d, reserve = %d",
-                        line.getArticleName() != null ? line.getArticleName() : line.getArticleId(),
+                        resolveArticleLabel(entry.getKey()),
                         besoin,
                         reserve));
             }
@@ -592,19 +617,53 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
         return ruptures;
     }
 
-    private com.osm.conditioning.projet.entity.Projet clearFailedProjectStatusIfReservationsAreUsable(
-            com.osm.conditioning.projet.entity.Projet projet
-    ) {
-        if (projet == null || projet.getId() == null || projet.getStatut() == null) {
-            return projet;
+    private List<String> findProjectInventoryRuptures(UUID projectId, List<LigneOF> lignes) {
+        List<String> ruptures = new ArrayList<>();
+        Projet projet = projetRepository.findByIdAndIsDeletedFalse(projectId).orElse(null);
+        if (projet == null) {
+            return ruptures;
         }
 
-        if (!"FAILED".equalsIgnoreCase(projet.getStatut())) {
-            return projet;
+        Map<UUID, Integer> reservedByArticle = projet.getReservations() == null
+                ? Map.of()
+                : projet.getReservations().stream()
+                .filter(reservation -> "CONFIRMED".equalsIgnoreCase(reservation.getStatut()))
+                .filter(reservation -> reservation.getArticleId() != null)
+                .collect(Collectors.toMap(
+                        ProjetReservation::getArticleId,
+                        reservation -> InventoryQuantityUtil.ceilToInt(reservation.getQuantiteReservee()),
+                        Integer::sum
+                ));
+
+        Map<UUID, Integer> requiredByArticle = aggregateRoundedNeeds(lignes);
+        for (Map.Entry<UUID, Integer> entry : requiredByArticle.entrySet()) {
+            UUID articleId = entry.getKey();
+            int besoin = entry.getValue();
+            int projectReserved = reservedByArticle.getOrDefault(articleId, 0);
+
+            try {
+                StockSecDto stock = getOrCreateStockForArticle(articleId);
+                int inventoryReserved = stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+                int disponible = stock.getQuantiteDisponible() != null ? stock.getQuantiteDisponible() : 0;
+                int usableFromReservation = Math.min(projectReserved, inventoryReserved);
+                int totalUsable = usableFromReservation + disponible;
+
+                if (besoin > totalUsable) {
+                    ruptures.add(String.format(
+                            "Article %s : besoin = %d, reserve projet = %d, reserve stock = %d, disponible = %d",
+                            resolveArticleLabel(articleId),
+                            besoin,
+                            projectReserved,
+                            inventoryReserved,
+                            disponible
+                    ));
+                }
+            } catch (Exception e) {
+                ruptures.add("Article " + resolveArticleLabel(articleId) + " : impossible de verifier le stock inventaire");
+            }
         }
 
-        projetService.updateStatus(projet.getId(), "BROUILLON");
-        return projetService.findByIdOrThrow(projet.getId());
+        return ruptures;
     }
 
     private Map<UUID, Integer> reserveStandaloneOfStock(List<LigneOF> lignes) {
@@ -630,7 +689,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     private Map<UUID, Integer> aggregateRoundedNeeds(List<LigneOF> lignes) {
         Map<UUID, Integer> needs = new LinkedHashMap<>();
         for (LigneOF ligne : lignes) {
-            int besoin = com.osm.conditioning.util.InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
+            int besoin = InventoryQuantityUtil.ceilToInt(ligne.getQuantiteTheorique());
             needs.merge(ligne.getArticleId(), besoin, Integer::sum);
         }
         return needs;
@@ -795,11 +854,14 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
     }
 
     private void consumeProjectOfStock(OrdreFabrication of, UUID articleId, Map<String, Object> payload, int quantity) {
-        int reservedQuantity = Math.min(quantity, getProjectReservedQuantity(of, articleId));
+        StockSecDto stock = getOrCreateStockForArticle(articleId);
+        int inventoryReserved = stock.getQuantiteReservee() != null ? stock.getQuantiteReservee() : 0;
+        int projectReserved = getProjectReservedQuantity(of, articleId);
+        int reservedQuantity = Math.min(quantity, Math.min(projectReserved, inventoryReserved));
+
         if (reservedQuantity > 0) {
             payload.put("quantite", reservedQuantity);
             clientInventaire.consommerReservation(articleId, payload);
-            decrementProjectReservation(of, articleId, reservedQuantity);
         }
 
         int extraQuantity = quantity - reservedQuantity;
@@ -808,6 +870,21 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
             payload.put("motif", payload.get("motif") + " (extra non reserve)");
             clientInventaire.sortieStock(articleId, payload);
         }
+
+        if (quantity > 0 && projectReserved > 0) {
+            decrementProjectReservation(of, articleId, Math.min(quantity, projectReserved));
+        }
+    }
+
+    private String resolveExceptionMessage(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current.getMessage() != null && !current.getMessage().isBlank()) {
+                return current.getMessage();
+            }
+            current = current.getCause();
+        }
+        return "erreur inconnue";
     }
 
     private StockSecDto getOrCreateStockForArticle(UUID articleId) {
@@ -903,7 +980,7 @@ public class OFService extends BaseServiceImpl<OrdreFabrication, OrdreFabricatio
                 throw new RuntimeException("Cuve d'huile introuvable (ID: " + lotVracId + ")");
             }
 
-            ApiResponse<com.osm.conditioning.expedition.dto.GenealogyDto> genealogyResponse =
+            ApiResponse<GenealogyDto> genealogyResponse =
                     productionStorageClient.getGenealogy(lotVracId);
             if (genealogyResponse != null && genealogyResponse.isSuccess() && genealogyResponse.getData() != null
                     && genealogyResponse.getData().getTraceabilityLotId() != null) {

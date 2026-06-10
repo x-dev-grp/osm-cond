@@ -18,6 +18,7 @@ import com.osm.conditioning.expedition.model.Expedition;
 import com.osm.conditioning.expedition.model.ExpeditionArticle;
 import com.osm.conditioning.expedition.repository.ExpeditionArticleRepository;
 import com.osm.conditioning.expedition.repository.ExpeditionRepository;
+import com.osm.conditioning.model.LabelContent;
 import com.osm.conditioning.model.OrdreFabrication;
 import com.osm.conditioning.projet.entity.Projet;
 import com.osm.conditioning.projet.entity.ProjetProduit;
@@ -812,7 +813,7 @@ public class ExpeditionService extends BaseServiceImpl<Expedition, ExpeditionDto
                 .anyMatch(this::isFinalLabel);
     }
 
-    private boolean isFinalLabel(com.osm.conditioning.model.LabelContent labelContent) {
+    private boolean isFinalLabel(LabelContent labelContent) {
         return labelContent.getStatus() == LabelContentStatus.FINALIZED
                 && labelContent.getFinalPayloadJson() != null
                 && !labelContent.getFinalPayloadJson().isBlank();
